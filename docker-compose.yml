@@ -1,0 +1,69 @@
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: ubique-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: ubique_product_checker
+    networks:
+      - ubique-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ubique-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DATABASE=ubique_product_checker
+      - BACKEND_HOST=0.0.0.0
+      - BACKEND_PORT=8080
+      - CORS_ORIGINS=http://localhost:3000,http://frontend:3000
+      - SCRAPER_TIMEOUT=30
+      - SCRAPER_USE_PLAYWRIGHT=true
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./backend/logs:/app/logs
+      - ./scraper:/app/scraper
+    depends_on:
+      - mongodb
+    networks:
+      - ubique-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ubique-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - ubique-network
+
+networks:
+  ubique-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+    driver: local

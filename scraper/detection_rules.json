@@ -1,0 +1,114 @@
+{
+  "add_to_cart": {
+    "css_selectors": [
+      "#add-to-cart",
+      "#add-to-cart-button",
+      ".add-to-cart",
+      ".add-to-cart-button",
+      "button[id*='add']",
+      "button[class*='add']",
+      "button[name*='add']",
+      "input[id*='add-to-cart']",
+      "input[type='submit'][value*='Add']",
+      "[data-action='add-to-cart']",
+      "[data-button-type='add-to-cart']"
+    ],
+    "text_patterns": [
+      "add to cart",
+      "add to bag",
+      "add to basket",
+      "add item",
+      "add product",
+      "agregar al carrito",
+      "ajouter au panier",
+      "in den warenkorb"
+    ],
+    "domains": {
+      "amazon.com": {
+        "selectors": ["#add-to-cart-button", "input#add-to-cart-button"],
+        "text": ["Add to Cart"]
+      },
+      "walmart.com": {
+        "selectors": [
+          "button[data-automation-id='atc']",
+          "button[data-automation-id='atc-btn']",
+          "button[data-automation-id='add-to-cart-button']",
+          "button[data-tl-id='ProductAddToCart-cta']",
+          "button.spin-button[data-automation-id='add-to-cart']",
+          "#add-to-cart-button"
+        ],
+        "text": ["Add to cart", "Add to Cart"]
+      },
+      "ebay.com": {
+        "selectors": ["#atcBtn", ".ux-call-to-action button"],
+        "text": ["Add to cart"]
+      },
+      "shopify.com": {
+        "selectors": ["button[name='add']", ".product-form__submit"],
+        "text": ["Add to cart"]
+      },
+      "target.com": {
+        "selectors": ["button[data-test='orderPickupButton']", "button[data-test='shipItButton']"],
+        "text": ["Add to cart"]
+      },
+      "wayfair.com": {
+        "selectors": [
+          "button[data-hb-id='LoadingButton']",
+          "button[data-enzyme-id='AddToCart']",
+          "button[data-hb-id='AddToCartButton']",
+          "#btn-add-to-cart"
+        ],
+        "text": ["Add to Cart"]
+      },
+      "homedepot.com": {
+        "selectors": [
+          "button[data-testid='add-to-cart']",
+          "button#add-to-cart-btn",
+          ".bttn__buy-now",
+          "button[data-component='add-to-cart-button']",
+          "button.bttn--primary[data-testid*='cart']",
+          "[data-automation-id='add-to-cart']",
+          "button[aria-label*='Add to Cart']"
+        ],
+        "text": ["Add to Cart", "Add To Cart", "ADD TO CART"]
+      }
+    }
+  },
+  "buy_now": {
+    "css_selectors": [
+      "#buy-now",
+      "#buy-now-button",
+      ".buy-now",
+      ".buy-now-button",
+      "button[id*='buy']",
+      "button[class*='buy']",
+      "[data-action='buy-now']",
+      "[data-button-type='buy-now']"
+    ],
+    "text_patterns": [
+      "buy now",
+      "buy it now",
+      "buy instantly",
+      "instant buy",
+      "comprar ahora",
+      "acheter maintenant",
+      "jetzt kaufen"
+    ],
+    "domains": {
+      "amazon.com": {
+        "selectors": ["#buy-now-button", "input#buy-now-button"],
+        "text": ["Buy Now"]
+      },
+      "ebay.com": {
+        "selectors": ["a[id*='binBtn']"],
+        "text": ["Buy It Now"]
+      }
+    }
+  },
+  "settings": {
+    "case_sensitive": false,
+    "partial_match": true,
+    "timeout": 30,
+    "wait_for_dynamic_content": 2
+  }
+}
