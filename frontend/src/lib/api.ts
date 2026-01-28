@@ -1,6 +1,11 @@
 import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || (() => {
+  if (typeof window !== 'undefined' && !process.env.NEXT_PUBLIC_API_URL) {
+    console.warn('NEXT_PUBLIC_API_URL not set — falling back to http://localhost:8080. Set this in .env.local for production.');
+  }
+  return 'http://localhost:8080';
+})();
 
 const api = axios.create({
   baseURL: API_URL,
@@ -25,6 +30,10 @@ export interface ScanResult {
   status: 'available' | 'unavailable' | 'error';
   error_message?: string;
   response_time?: number;
+  scrape_method?: string;
+  variants?: Record<string, 'available' | 'unavailable'>;
+  variants_checked?: boolean;
+  unavailability_override?: boolean;
 }
 
 export interface Stats {
@@ -64,6 +73,11 @@ export const runScan = async (url_ids?: string[]) => {
   return response.data;
 };
 
+export const getScanStatus = async (): Promise<{ scanning: boolean }> => {
+  const response = await api.get('/api/scan/status');
+  return response.data;
+};
+
 export const getScanResults = async (url?: string, status_filter?: string) => {
   const response = await api.get<ScanResult[]>('/api/scan/results', {
     params: { url, status_filter },
@@ -71,7 +85,7 @@ export const getScanResults = async (url?: string, status_filter?: string) => {
   return response.data;
 };
 
-export const getLatestResults = async (limit: number = 50) => {
+export const getLatestResults = async (limit: number = 500) => {
   const response = await api.get<ScanResult[]>('/api/scan/results/latest', {
     params: { limit },
   });

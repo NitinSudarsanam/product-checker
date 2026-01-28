@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
-import { Play, RefreshCw, ShoppingCart } from 'lucide-react';
+import { Play, RefreshCw, ShoppingCart, X } from 'lucide-react';
 import URLInput from '@/components/URLInput';
 import URLList from '@/components/URLList';
 import ResultsTable from '@/components/ResultsTable';
@@ -10,6 +10,7 @@ import {
   getURLs,
   deleteURL,
   runScan,
+  getScanStatus,
   getLatestResults,
   getStats,
   URL as URLType,
@@ -23,12 +24,24 @@ export default function Home() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{ done: number; total: number; elapsed: number } | null>(null);
   const [notification, setNotification] = useState<{
     message: string;
     type: 'success' | 'error';
   } | null>(null);
+  const notificationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const elapsedIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fetch initial data
+  // Cleanup all timers on unmount (7.7, 7.10)
+  useEffect(() => {
+    return () => {
+      if (notificationTimer.current) clearTimeout(notificationTimer.current);
+      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
+      if (elapsedIntervalRef.current) clearInterval(elapsedIntervalRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -46,15 +59,21 @@ export default function Home() {
       setStats(statsData);
     } catch (error) {
       console.error('Error fetching data:', error);
-      showNotification('Failed to fetch data', 'error');
+      showNotification('Failed to fetch data from backend', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const showNotification = (message: string, type: 'success' | 'error') => {
+    if (notificationTimer.current) clearTimeout(notificationTimer.current);
     setNotification({ message, type });
-    setTimeout(() => setNotification(null), 5000);
+    notificationTimer.current = setTimeout(() => setNotification(null), 8000);
+  };
+
+  const dismissNotification = () => {
+    if (notificationTimer.current) clearTimeout(notificationTimer.current);
+    setNotification(null);
   };
 
   const handleAddURLs = async (urlList: string[], groupName?: string) => {
@@ -75,12 +94,12 @@ export default function Home() {
   };
 
   const handleDeleteURL = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this URL?')) return;
-    
+    if (!confirm('Delete this URL and its scan history?')) return;
+
     setLoading(true);
     try {
       await deleteURL(id);
-      showNotification('URL deleted successfully', 'success');
+      showNotification('URL deleted', 'success');
       await fetchData();
     } catch (error) {
       showNotification('Failed to delete URL', 'error');
@@ -91,23 +110,71 @@ export default function Home() {
 
   const handleRunScan = async () => {
     if (urls.length === 0) {
-      showNotification('Please add some URLs first', 'error');
+      showNotification('Add some URLs before scanning', 'error');
       return;
     }
 
     setScanning(true);
+    setScanProgress({ done: 0, total: urls.length, elapsed: 0 });
+
+    const startMs = Date.now();
+
     try {
       const result = await runScan();
       showNotification(result.message, 'success');
-      
-      // Poll for results
-      setTimeout(async () => {
-        await fetchData();
+
+      const expectedCount = result.url_count;
+      let attempts = 0;
+      const maxAttempts = 72; // 6 min max (72 × 5s)
+
+      elapsedIntervalRef.current = setInterval(() => {
+        setScanProgress(prev => prev ? { ...prev, elapsed: Math.floor((Date.now() - startMs) / 1000) } : null);
+      }, 1000);
+
+      const stopPolling = () => {
+        if (elapsedIntervalRef.current) { clearInterval(elapsedIntervalRef.current); elapsedIntervalRef.current = null; }
+        if (pollTimeoutRef.current) { clearTimeout(pollTimeoutRef.current); pollTimeoutRef.current = null; }
         setScanning(false);
-      }, 5000);
-    } catch (error) {
-      showNotification('Failed to start scan', 'error');
+        setScanProgress(null);
+      };
+
+      // Use /api/scan/status to detect completion — no timezone-sensitive timestamp comparison (7.1, 7.4)
+      const poll = async () => {
+        attempts++;
+        try {
+          const [statusRes, latest] = await Promise.all([
+            getScanStatus(),
+            getLatestResults(500),
+          ]);
+
+          setScanProgress({ done: latest.length, total: expectedCount, elapsed: Math.floor((Date.now() - startMs) / 1000) });
+          await fetchData();
+
+          if (!statusRes.scanning || attempts >= maxAttempts) {
+            stopPolling();
+            showNotification(
+              !statusRes.scanning
+                ? `Scan complete — ${expectedCount} URLs scanned`
+                : 'Scan timed out waiting for results',
+              !statusRes.scanning ? 'success' : 'error'
+            );
+          } else {
+            pollTimeoutRef.current = setTimeout(poll, 5000);
+          }
+        } catch (err) {
+          stopPolling();
+          showNotification('Error polling scan results', 'error');
+        }
+      };
+
+      pollTimeoutRef.current = setTimeout(poll, 5000);
+    } catch (error: any) {
+      const msg = error?.response?.status === 409
+        ? 'A scan is already in progress'
+        : 'Failed to start scan';
+      showNotification(msg, 'error');
       setScanning(false);
+      setScanProgress(null);
     }
   };
 
@@ -141,8 +208,8 @@ export default function Home() {
                   </p>
                 </div>
               </div>
-              
-              <div className="flex gap-2">
+
+              <div className="flex gap-2 items-center">
                 <button
                   onClick={handleRefresh}
                   disabled={loading || scanning}
@@ -151,17 +218,35 @@ export default function Home() {
                   <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
                   Refresh
                 </button>
-                
+
                 <button
                   onClick={handleRunScan}
                   disabled={scanning || loading || urls.length === 0}
                   className="px-6 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2 font-medium"
                 >
-                  <Play size={16} />
+                  <Play size={16} className={scanning ? 'animate-pulse' : ''} />
                   {scanning ? 'Scanning...' : 'Run Scan'}
                 </button>
               </div>
             </div>
+
+            {/* Scan Progress Bar */}
+            {scanning && scanProgress && (
+              <div className="mt-3">
+                <div className="flex justify-between text-sm text-gray-600 mb-1">
+                  <span>
+                    Scanning {scanProgress.done}/{scanProgress.total} URLs
+                  </span>
+                  <span>{scanProgress.elapsed}s elapsed</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-primary-600 h-2 rounded-full transition-all duration-500"
+                    style={{ width: scanProgress.total > 0 ? `${Math.min(100, (scanProgress.done / scanProgress.total) * 100)}%` : '5%' }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </header>
 
@@ -169,13 +254,16 @@ export default function Home() {
         {notification && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
             <div
-              className={`p-4 rounded-md ${
+              className={`p-4 rounded-md flex items-center justify-between ${
                 notification.type === 'success'
                   ? 'bg-green-50 border border-green-200 text-green-800'
                   : 'bg-red-50 border border-red-200 text-red-800'
               }`}
             >
-              {notification.message}
+              <span>{notification.message}</span>
+              <button onClick={dismissNotification} className="ml-4 opacity-60 hover:opacity-100">
+                <X size={16} />
+              </button>
             </div>
           </div>
         )}
@@ -183,21 +271,13 @@ export default function Home() {
         {/* Main Content */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="space-y-8">
-            {/* Stats */}
             <StatsCard stats={stats} loading={loading} />
-
-            {/* URL Input */}
             <URLInput onAdd={handleAddURLs} loading={loading} />
-
-            {/* URL List */}
             <URLList urls={urls} onDelete={handleDeleteURL} loading={loading} />
-
-            {/* Results */}
             <ResultsTable results={results} loading={scanning} />
           </div>
         </main>
 
-        {/* Footer */}
         <footer className="bg-white border-t border-gray-200 mt-12">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <p className="text-center text-sm text-gray-600">
