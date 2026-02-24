@@ -5,13 +5,21 @@
       "#add-to-cart-button",
       ".add-to-cart",
       ".add-to-cart-button",
-      "button[id*='add']",
-      "button[class*='add']",
+      "button[id*='add-to-cart']",
+      "button[class*='add-to-cart']",
+      "button[id*='addToCart']",
+      "button[class*='addToCart']",
       "button[name*='add']",
       "input[id*='add-to-cart']",
       "input[type='submit'][value*='Add']",
       "[data-action='add-to-cart']",
-      "[data-button-type='add-to-cart']"
+      "[data-button-type='add-to-cart']",
+      "[aria-label*='Add to cart']",
+      "[aria-label*='Add to Cart']",
+      "[data-testid*='add-to-cart']",
+      "[data-test*='add-to-cart']",
+      "button[class*='AddToCart']",
+      "button[class*='atc']"
     ],
     "text_patterns": [
       "add to cart",
@@ -21,12 +29,20 @@
       "add product",
       "agregar al carrito",
       "ajouter au panier",
-      "in den warenkorb"
+      "in den warenkorb",
+      "añadir al carrito",
+      "aggiungi al carrello",
+      "カートに入れる",
+      "장바구니에 담기"
     ],
     "domains": {
       "amazon.com": {
-        "selectors": ["#add-to-cart-button", "input#add-to-cart-button"],
-        "text": ["Add to Cart"]
+        "selectors": [
+          "#add-to-cart-button",
+          "input#add-to-cart-button",
+          "#submit.add-to-cart"
+        ],
+        "text": ["Add to Cart", "Add to cart"]
       },
       "walmart.com": {
         "selectors": [
@@ -35,20 +51,34 @@
           "button[data-automation-id='add-to-cart-button']",
           "button[data-tl-id='ProductAddToCart-cta']",
           "button.spin-button[data-automation-id='add-to-cart']",
-          "#add-to-cart-button"
+          "#add-to-cart-button",
+          "button[data-automation-id*='add-to-cart']"
         ],
         "text": ["Add to cart", "Add to Cart"]
       },
       "ebay.com": {
-        "selectors": ["#atcBtn", ".ux-call-to-action button"],
-        "text": ["Add to cart"]
+        "selectors": [
+          "#atcBtn",
+          ".ux-call-to-action button",
+          "a.btn.btn-prim[data-action*='cart']"
+        ],
+        "text": ["Add to cart", "Add to Cart"]
       },
       "shopify.com": {
-        "selectors": ["button[name='add']", ".product-form__submit"],
-        "text": ["Add to cart"]
+        "selectors": [
+          "button[name='add']",
+          ".product-form__submit",
+          "button[data-testid='Checkout-button']"
+        ],
+        "text": ["Add to cart", "Add to bag"]
       },
       "target.com": {
-        "selectors": ["button[data-test='orderPickupButton']", "button[data-test='shipItButton']"],
+        "selectors": [
+          "button[data-test='orderPickupButton']",
+          "button[data-test='shipItButton']",
+          "button[data-test='addToCartButton']",
+          "button[data-test='fulfillment-add-to-cart-button']"
+        ],
         "text": ["Add to cart"]
       },
       "wayfair.com": {
@@ -56,9 +86,17 @@
           "button[data-hb-id='LoadingButton']",
           "button[data-enzyme-id='AddToCart']",
           "button[data-hb-id='AddToCartButton']",
-          "#btn-add-to-cart"
+          "#btn-add-to-cart",
+          "button[class*='AddToCartButton']",
+          "button[class*='add-to-cart']",
+          "[data-testid='add-to-cart']",
+          "[data-testid='AddToCart']",
+          "button[aria-label*='Add to Cart']",
+          "button[data-hb-id*='Cart']",
+          "button[class*='atcButton']",
+          "button[class*='AtcButton']"
         ],
-        "text": ["Add to Cart"]
+        "text": ["Add to Cart", "Add to cart", "Add To Cart"]
       },
       "homedepot.com": {
         "selectors": [
@@ -68,9 +106,32 @@
           "button[data-component='add-to-cart-button']",
           "button.bttn--primary[data-testid*='cart']",
           "[data-automation-id='add-to-cart']",
-          "button[aria-label*='Add to Cart']"
+          "button[aria-label*='Add to Cart']",
+          "button[data-testid='fulfillment-ATCButton']"
         ],
         "text": ["Add to Cart", "Add To Cart", "ADD TO CART"]
+      },
+      "bestbuy.com": {
+        "selectors": [
+          "button.add-to-cart-button",
+          "button[data-sku-id]",
+          ".fulfillment-add-to-cart-button"
+        ],
+        "text": ["Add to Cart"]
+      },
+      "etsy.com": {
+        "selectors": [
+          "button[data-selector='add-to-cart-button']",
+          "button[type='submit'][class*='cart']"
+        ],
+        "text": ["Add to cart", "Add to basket"]
+      },
+      "costco.com": {
+        "selectors": [
+          "input[value='Add to Cart']",
+          "button.btn-primary[class*='add-to-cart']"
+        ],
+        "text": ["Add to Cart"]
       }
     }
   },
@@ -80,28 +141,66 @@
       "#buy-now-button",
       ".buy-now",
       ".buy-now-button",
-      "button[id*='buy']",
-      "button[class*='buy']",
+      "button[id*='buy-now']",
+      "button[class*='buy-now']",
+      "button[id*='buyNow']",
+      "button[class*='buyNow']",
       "[data-action='buy-now']",
-      "[data-button-type='buy-now']"
+      "[data-button-type='buy-now']",
+      "[aria-label*='Buy Now']",
+      "[data-testid*='buy-now']",
+      "button[class*='BuyNow']",
+      "button[class*='CheckoutButton']"
     ],
     "text_patterns": [
       "buy now",
       "buy it now",
       "buy instantly",
       "instant buy",
+      "order now",
+      "purchase now",
+      "checkout now",
       "comprar ahora",
       "acheter maintenant",
-      "jetzt kaufen"
+      "jetzt kaufen",
+      "acquista ora",
+      "pre-order",
+      "preorder",
+      "reserve now",
+      "pre order now"
     ],
     "domains": {
       "amazon.com": {
-        "selectors": ["#buy-now-button", "input#buy-now-button"],
-        "text": ["Buy Now"]
+        "selectors": [
+          "#buy-now-button",
+          "input#buy-now-button",
+          "#one-click-button",
+          "button[id*='buy-now']"
+        ],
+        "text": ["Buy Now", "Buy now"]
       },
       "ebay.com": {
-        "selectors": ["a[id*='binBtn']"],
-        "text": ["Buy It Now"]
+        "selectors": [
+          "a[id*='binBtn']",
+          "a[data-action*='buy-now']",
+          ".binBtn"
+        ],
+        "text": ["Buy It Now", "Buy it now"]
+      },
+      "walmart.com": {
+        "selectors": [
+          "button[data-automation-id='buy-now']",
+          "button[data-tl-id='ProductBuyNow']"
+        ],
+        "text": ["Buy Now"]
+      },
+      "target.com": {
+        "selectors": ["button[data-test='buyNowButton']"],
+        "text": ["Buy Now"]
+      },
+      "bestbuy.com": {
+        "selectors": ["button.buy-now-button"],
+        "text": ["Buy Now"]
       }
     }
   },
