@@ -14,15 +14,34 @@ db = Database()
 
 
 async def connect_to_mongo():
-    """Connect to MongoDB"""
+    """Connect to MongoDB and ensure indexes exist"""
     try:
         logger.info(f"Connecting to MongoDB at {settings.mongodb_url}")
-        db.client = AsyncIOMotorClient(settings.mongodb_url)
+        db.client = AsyncIOMotorClient(
+            settings.mongodb_url,
+            maxPoolSize=settings.mongodb_max_pool_size,
+        )
         db.db = db.client[settings.mongodb_database]
-        
-        # Test connection
+
         await db.client.server_info()
         logger.info("Successfully connected to MongoDB")
+
+        # Indexes for scan_results
+        await db.db.scan_results.create_index([("url", 1)])
+        await db.db.scan_results.create_index([("url_id", 1)])
+        await db.db.scan_results.create_index([("scanned_at", -1)])
+
+        # TTL index on logs — auto-expire entries older than 30 days
+        await db.db.logs.create_index(
+            [("timestamp", 1)],
+            expireAfterSeconds=2592000,
+            background=True
+        )
+
+        # Index for URL dedup lookup
+        await db.db.urls.create_index([("url", 1)], unique=True, background=True)
+
+        logger.info("MongoDB indexes ensured")
     except Exception as e:
         logger.error(f"Failed to connect to MongoDB: {e}")
         raise
