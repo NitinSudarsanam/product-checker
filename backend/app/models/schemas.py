@@ -1,8 +1,35 @@
+import ipaddress
+from urllib.parse import urlparse
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 from pydantic_core import core_schema
 from datetime import datetime
 from typing import Optional, List, Any
 from bson import ObjectId
+
+
+def _is_ssrf_unsafe(url: str) -> bool:
+    """Block private IPs, localhost, link-local, and non-http schemes (10.1)."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https'):
+            return True
+        hostname = parsed.hostname
+        if not hostname:
+            return True
+        blocked_hosts = {'localhost', '127.0.0.1', '::1', '0.0.0.0', 'metadata.google.internal'}
+        if hostname.lower() in blocked_hosts:
+            return True
+        if hostname.endswith('.local') or hostname.endswith('.internal'):
+            return True
+        try:
+            ip = ipaddress.ip_address(hostname)
+            return (ip.is_private or ip.is_loopback or
+                    ip.is_link_local or ip.is_reserved or ip.is_multicast)
+        except ValueError:
+            pass  # Not an IP address — hostname is fine
+        return False
+    except Exception:
+        return True
 
 
 class PyObjectId(ObjectId):
@@ -57,6 +84,21 @@ class URLModel(BaseModel):
 class URLCreateRequest(BaseModel):
     urls: List[str]
     group_name: Optional[str] = None
+
+    @field_validator('urls', mode='before')
+    @classmethod
+    def validate_urls(cls, v):
+        if not isinstance(v, list) or len(v) == 0:
+            raise ValueError('At least one URL required')
+        if len(v) > 500:
+            raise ValueError('Maximum 500 URLs per request')
+        for url in v:
+            url = url.strip()
+            if not url.startswith(('http://', 'https://')):
+                raise ValueError(f'URL must start with http:// or https://: {url}')
+            if _is_ssrf_unsafe(url):
+                raise ValueError(f'URL targets a private or reserved address: {url}')
+        return [u.strip() for u in v]
 
     class Config:
         json_schema_extra = {
