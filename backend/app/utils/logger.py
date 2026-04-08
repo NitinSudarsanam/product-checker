@@ -2,6 +2,7 @@ import logging
 import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from datetime import datetime
 from app.config import settings
 
 # Create logs directory if it doesn't exist
@@ -63,6 +64,3 @@ async def log_to_database(db, event_type: str, details: dict, level: str = "INFO
         await db.logs.insert_one(log_entry)
     except Exception as e:
         logger.error(f"Failed to log to database: {e}")
-
-
-from datetime import datetime

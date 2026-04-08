@@ -86,13 +86,19 @@ async def get_stats():
         # Count URLs
         total_urls = await db.urls.count_documents({})
         
-        # Count total scans
+        # Count total scan runs (all historical records)
         total_scans = await db.scan_results.count_documents({})
-        
-        # Count by status
-        available_count = await db.scan_results.count_documents({"status": "available"})
-        unavailable_count = await db.scan_results.count_documents({"status": "unavailable"})
-        error_count = await db.scan_results.count_documents({"status": "error"})
+
+        # Count by status using only the LATEST result per URL
+        latest_pipeline = [
+            {"$sort": {"scanned_at": -1}},
+            {"$group": {"_id": "$url", "status": {"$first": "$status"}}},
+        ]
+        latest_results = await db.scan_results.aggregate(latest_pipeline).to_list(length=None)
+
+        available_count = sum(1 for r in latest_results if r["status"] == "available")
+        unavailable_count = sum(1 for r in latest_results if r["status"] == "unavailable")
+        error_count = sum(1 for r in latest_results if r["status"] == "error")
         
         return {
             "total_urls": total_urls,
