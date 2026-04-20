@@ -21,13 +21,13 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Configure CORS
+# Configure CORS — restrict to needed methods only (10.3)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
@@ -71,9 +71,17 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    from app.database import db as _db
+    db_status = "disconnected"
+    try:
+        if _db.client:
+            await _db.client.server_info()
+            db_status = "connected"
+    except Exception:
+        db_status = "disconnected"
     return {
-        "status": "healthy",
-        "database": "connected"
+        "status": "healthy" if db_status == "connected" else "degraded",
+        "database": db_status
     }
 
 
