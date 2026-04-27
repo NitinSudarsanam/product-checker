@@ -6,6 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     wget \
+    curl \
     gnupg \
     ca-certificates \
     fonts-liberation \

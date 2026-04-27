@@ -42,8 +42,25 @@ class Settings(BaseSettings):
     scraper_use_playwright: bool = True
     scraper_headless: bool = True
     scraper_check_variants: bool = True  # Click variant options and check each
+    # False = Playwright first (pre–ScrapingBee behavior). True = ScrapingBee HTML first, then fallbacks.
+    scraper_scrapingbee_first: bool = False
+    # Whole-task asyncio budget in Celery (Playwright nav + variants). 0 = auto in scan_tasks.
+    scraper_per_url_task_timeout_seconds: int = 0
+    # Celery must not kill the task before asyncio.wait_for (soft < hard; both generous).
+    celery_scrape_task_soft_time_limit: int = 1080
+    celery_scrape_task_time_limit: int = 1200
     scrapingbee_api_key: str = ""
     scrapingbee_country_code: str = "us"
+
+    # Queue / workers
+    redis_url: str = "redis://localhost:6379/0"
+    celery_concurrency: int = 2
+
+    # Method-level concurrency caps (Option B)
+    playwright_max_concurrent: int = 2
+    scrapingbee_max_workers: int = 5
+    scrapingbee_max_concurrent: int = 5
+    scrapingbee_rps: float = 0.0  # 0/<=0 disables RPS limiting
 
     # Logging — resolved to absolute path at load time (8.4)
     log_level: str = "INFO"
@@ -84,3 +101,9 @@ if settings.secret_key == _PLACEHOLDER_KEY:
 
 if settings.backend_reload:
     _log.warning("BACKEND_RELOAD=true — background scan tasks will be killed on file changes")
+
+# ScrapingBee wiring sanity (do not log the key itself)
+if settings.scrapingbee_api_key:
+    _log.info(f"ScrapingBee enabled (key_len={len(settings.scrapingbee_api_key)})")
+else:
+    _log.info("ScrapingBee disabled (no API key configured)")

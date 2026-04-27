@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 from pydantic_core import core_schema
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 from bson import ObjectId
 
 
@@ -121,6 +121,13 @@ class ScanResult(BaseModel):
     status: str  # "available", "unavailable", "error"
     error_message: Optional[str] = None
     response_time: Optional[float] = None
+    scrape_method: Optional[str] = None
+    html_primary_source: Optional[str] = None
+    variants: Optional[Dict[str, str]] = None
+    variants_checked: Optional[bool] = None
+    unavailability_override: Optional[bool] = None
+    job_id: Optional[str] = None
+    url_id: Optional[str] = None
 
     class Config:
         populate_by_name = True
@@ -146,6 +153,21 @@ class ScanRequest(BaseModel):
                 "url_ids": ["507f1f77bcf86cd799439011", "507f1f77bcf86cd799439012"]
             }
         }
+
+
+class ScanJobStatus(BaseModel):
+    job_id: str
+    status: str  # queued|running|done|failed|cancelled
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    total_urls: int = 0
+    completed: int = 0
+    success: int = 0
+    error: int = 0
+    rate_urls_per_sec: Optional[float] = None
+    eta_seconds: Optional[int] = None
+    last_update_at: Optional[datetime] = None
 
 
 class LogEntry(BaseModel):

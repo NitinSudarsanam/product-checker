@@ -31,6 +31,11 @@ async def connect_to_mongo():
         await db.db.scan_results.create_index([("url_id", 1)])
         await db.db.scan_results.create_index([("scanned_at", -1)])
 
+        # Indexes for scan_jobs (job tracking / progress)
+        await db.db.scan_jobs.create_index([("job_id", 1)], unique=True, background=True)
+        await db.db.scan_jobs.create_index([("created_at", -1)], background=True)
+        await db.db.scan_jobs.create_index([("status", 1)], background=True)
+
         # TTL index on logs — auto-expire entries older than 30 days
         await db.db.logs.create_index(
             [("timestamp", 1)],

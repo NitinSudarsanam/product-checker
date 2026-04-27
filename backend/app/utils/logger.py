@@ -5,9 +5,12 @@ from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from app.config import settings
 
-# Create logs directory if it doesn't exist
-log_dir = Path("logs")
-log_dir.mkdir(exist_ok=True)
+# Ensure parent dir for LOG_FILE exists (robust in containers)
+try:
+    Path(settings.log_file).parent.mkdir(parents=True, exist_ok=True)
+except Exception:
+    # Fall back to a relative logs dir if env path is odd
+    Path("logs").mkdir(parents=True, exist_ok=True)
 
 
 def setup_logger(name: str = __name__) -> logging.Logger:

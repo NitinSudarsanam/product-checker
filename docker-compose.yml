@@ -13,6 +13,16 @@ services:
     networks:
       - ubique-network
 
+  # Redis (task queue / job state)
+  redis:
+    image: redis:7.2-alpine
+    container_name: ubique-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - ubique-network
+
   # Backend API
   backend:
     build:
@@ -21,21 +31,28 @@ services:
     container_name: ubique-backend
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8080:8000"
     environment:
       - MONGODB_URL=mongodb://mongodb:27017
       - MONGODB_DATABASE=ubique_product_checker
       - BACKEND_HOST=0.0.0.0
-      - BACKEND_PORT=8080
-      - CORS_ORIGINS=http://localhost:3000,http://frontend:3000
+      - BACKEND_PORT=8000
+      - CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000","http://frontend:3000"]
       - SCRAPER_TIMEOUT=30
       - SCRAPER_USE_PLAYWRIGHT=true
+      - SCRAPINGBEE_API_KEY=${SCRAPINGBEE_API_KEY}
       - LOG_LEVEL=INFO
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_CONCURRENCY=2
+      - PLAYWRIGHT_MAX_CONCURRENT=2
+      - SCRAPINGBEE_MAX_WORKERS=5
+      - SCRAPINGBEE_MAX_CONCURRENT=5
     volumes:
       - ./backend/logs:/app/logs
       - ./scraper:/app/scraper
     depends_on:
       - mongodb
+      - redis
     networks:
       - ubique-network
     healthcheck:
@@ -43,6 +60,34 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Worker (Celery) — scale with: docker compose up -d --scale worker=N
+  # (Do not set container_name here; it breaks scaling.)
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["celery", "-A", "app.celery_app.celery_app", "worker", "-l", "INFO", "--concurrency=2"]
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DATABASE=ubique_product_checker
+      - REDIS_URL=redis://redis:6379/0
+      - SCRAPER_TIMEOUT=30
+      - SCRAPER_USE_PLAYWRIGHT=true
+      - SCRAPINGBEE_API_KEY=${SCRAPINGBEE_API_KEY}
+      - LOG_LEVEL=INFO
+      - PLAYWRIGHT_MAX_CONCURRENT=2
+      - SCRAPINGBEE_MAX_WORKERS=5
+      - SCRAPINGBEE_MAX_CONCURRENT=5
+    volumes:
+      - ./backend/logs:/app/logs
+      - ./scraper:/app/scraper
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - ubique-network
 
   # Frontend
   frontend:
@@ -54,9 +99,10 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:8080
     depends_on:
       - backend
+      - worker
     networks:
       - ubique-network
 
