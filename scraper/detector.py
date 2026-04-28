@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from bs4 import BeautifulSoup, Tag
@@ -25,13 +26,14 @@ _FALLBACK_RULES = {
     },
 }
 
-# Text on page that overrides button detection — product is unavailable
+# Text on page that overrides button detection — product is unavailable.
+# Keep phrases specific; vague strings like "not available" match unrelated
+# PDP copy (fulfillment, other sellers, recommendations) and false-negative Walmart/Amazon.
 _UNAVAILABLE_SIGNALS = [
     "sold out",
     "out of stock",
     "currently unavailable",
     "item unavailable",
-    "not available",
     "temporarily out of stock",
     "back order",
     "backordered",
@@ -39,7 +41,24 @@ _UNAVAILABLE_SIGNALS = [
     "join waitlist",
     "join the waitlist",
     "out-of-stock",
+    "we don't know when or if this item will be back in stock",
+    "this item cannot be shipped to your selected delivery location",
+    "no longer available",
+    "has been discontinued",
+    "discontinued by manufacturer",
+    "notify me",
 ]
+
+# Text that often appears on OOS CTAs but is not a purchase action
+_NEGATIVE_BUY_TEXT = (
+    "notify me",
+    "notify",
+    "email me",
+    "join waitlist",
+    "waitlist",
+    "out of stock",
+    "sold out",
+)
 
 # CSS classes/attrs that mark a button as non-functional even if text matches
 _DISABLED_CLASSES = {
@@ -95,6 +114,9 @@ class ButtonDetector:
         # ARIA disabled
         if element.get('aria-disabled') in ('true', '1'):
             return False
+        # Still hydrating / not actionable (Wayfair, React SPAs)
+        if element.get('aria-busy') in ('true', '1'):
+            return False
         # CSS class names
         classes = set(c.lower() for c in element.get('class', []))
         if classes & _DISABLED_CLASSES:
@@ -102,28 +124,142 @@ class ButtonDetector:
         # data attributes some sites use
         if element.get('data-disabled') in ('true', '1'):
             return False
+        # OOS CTA text should not count as a buy button even if it's clickable
+        try:
+            txt = self._normalize_text(element.get_text(" ", strip=True))
+            aria = self._normalize_text(element.get("aria-label", "") or "")
+            title = self._normalize_text(element.get("title", "") or "")
+            combined = " ".join([txt, aria, title])
+            if any(bad in combined for bad in _NEGATIVE_BUY_TEXT):
+                return False
+        except Exception:
+            pass
         return True
 
-    def _has_unavailability_signal(self, soup: BeautifulSoup) -> bool:
-        """Check if page contains explicit out-of-stock / sold-out text.
+    def _product_scope_elements(self, soup: BeautifulSoup, url: str) -> List[Tag]:
+        """Narrow regions where OOS copy is trustworthy (avoid recs / footer / other sellers)."""
+        domain = self._get_domain(url)
+        regions: List[Tag] = []
+        seen = set()
 
-        Used as a final override: if page clearly says "sold out", report
-        unavailable even if a (stale) buy button DOM node still exists.
+        def add_el(el: Optional[Tag]) -> None:
+            if el is None or id(el) in seen:
+                return
+            seen.add(id(el))
+            regions.append(el)
+
+        # High-signal layout hooks (order matters)
+        for sel in (
+            "#buybox",
+            "#dp",
+            "#centerCol",
+            "#ppd",
+            '[data-testid="product-buy-box"]',
+            '[data-testid="add-to-cart-section"]',
+            "main",
+            '[role="main"]',
+            "#main-content",
+            "#main",
+            "[itemprop='offers']",
+            "[itemprop=\"offers\"]",
+        ):
+            try:
+                for el in soup.select(sel):
+                    add_el(el)
+            except Exception:
+                continue
+
+        # Retailer-specific hooks
+        if "walmart.com" in domain:
+            for sel in ('[data-testid="product"]', "#main", "article"):
+                try:
+                    for el in soup.select(sel):
+                        add_el(el)
+                except Exception:
+                    continue
+
+        if "wayfair.com" in domain:
+            for sel in ("#pdp-mt-grid", "#pdp", "article"):
+                try:
+                    for el in soup.select(sel):
+                        add_el(el)
+                except Exception:
+                    continue
+
+        if re.search(r"(^|\.)amazon\.", domain):
+            for sel in ("#ppd", "#desktop_buybox", "#mobile_buybox", "#freshBuyBox"):
+                try:
+                    for el in soup.select(sel):
+                        add_el(el)
+                except Exception:
+                    continue
+
+        if not regions:
+
+            def _class_text(c) -> str:
+                if isinstance(c, list):
+                    return " ".join(c).lower()
+                return str(c).lower()
+
+            for el in soup.find_all(class_=lambda c: c and any(
+                kw in _class_text(c)
+                for kw in ("availability", "inventory", "fulfillment-atc", "add-to-cart")
+            )):
+                add_el(el)
+
+        return regions
+
+    @staticmethod
+    def _out_of_stock_is_product_level(text: str) -> bool:
+        """True if an 'out of stock' mention is likely this SKU, not 'other sellers' / compare."""
+        t = text.lower()
+        start = 0
+        phrase = "out of stock"
+        while True:
+            j = t.find(phrase, start)
+            if j < 0:
+                return False
+            window = t[j : j + 80]
+            if "other seller" in window or "from other" in window or "compare with" in window:
+                start = j + len(phrase)
+                continue
+            return True
+
+    def _has_unavailability_signal(self, soup: BeautifulSoup, url: str) -> bool:
+        """True only if explicit OOS phrases appear inside product-scoped regions.
+
+        Never scans the full document: related products and global nav often contain
+        'out of stock' / 'unavailable' and would incorrectly kill a valid PDP buy button.
         """
-        # Look in common containers first (faster + more accurate than full text)
-        containers = (
-            soup.find_all(class_=lambda c: c and any(
-                kw in ' '.join(c).lower()
-                for kw in ('availability', 'stock', 'status', 'inventory', 'atc', 'pdp')
-            ))
-            or [soup]  # fall back to full page
-        )
+        containers = self._product_scope_elements(soup, url)
+        if not containers:
+            # Wayfair uses heavily hashed classes; product scoping can fail.
+            domain = self._get_domain(url)
+            if "wayfair.com" in domain:
+                raw = str(soup).lower()
+                sample = raw[:120000] + " " + raw[-120000:]
+                if ("out of stock" in sample) or ("notify me" in sample):
+                    return True
+            return False
+
         for container in containers:
-            text = self._normalize_text(container.get_text(' ', strip=True))
+            text = self._normalize_text(container.get_text(" ", strip=True))
+            # Large pages (Wayfair) can place OOS copy far from the top.
+            # Sample both head and tail to avoid missing in-scope signals.
+            if len(text) > 80000:
+                text = text[:80000] + " " + text[-80000:]
             for signal in _UNAVAILABLE_SIGNALS:
                 if signal in text:
-                    logger.debug(f"Unavailability signal found: '{signal}'")
+                    if signal == "out of stock" and not self._out_of_stock_is_product_level(text):
+                        continue
+                    logger.debug(f"Unavailability signal found in product scope: '{signal}'")
                     return True
+        # Wayfair: if we scoped but missed text extraction, fall back to raw HTML sample.
+        domain = self._get_domain(url)
+        if "wayfair.com" in domain:
+            raw = str(soup).lower()
+            if ("out of stock" in raw) or ("notify me" in raw):
+                return True
         return False
 
     def _check_text_match(self, element_text: str, patterns: List[str]) -> bool:
@@ -219,7 +355,7 @@ class ButtonDetector:
 
         # Override: explicit sold-out / out-of-stock signal on page beats button detection.
         # Handles variant pages where default is OOS but button DOM still renders.
-        unavailability_override = button_found and self._has_unavailability_signal(soup)
+        unavailability_override = button_found and self._has_unavailability_signal(soup, url)
         if unavailability_override:
             logger.info(f"Unavailability override for {url} — button found but OOS signal detected")
             add_to_cart_found = False
