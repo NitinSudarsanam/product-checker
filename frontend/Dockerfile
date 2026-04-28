@@ -15,7 +15,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Set environment variable
-ENV NEXT_PUBLIC_API_URL=http://backend:8000
+# This value is baked into the browser bundle at build time.
+# Use localhost for local Docker Desktop access from the host browser.
+ENV NEXT_PUBLIC_API_URL=http://localhost:8080
 
 RUN npm run build
 

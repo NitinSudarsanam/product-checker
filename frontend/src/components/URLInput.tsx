@@ -70,95 +70,82 @@ const URLInput: React.FC<URLInputProps> = ({ onAdd, loading }) => {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
-      <h2 className="text-2xl font-bold text-gray-800 mb-4">Add URLs</h2>
-      
-      {/* Mode Toggle */}
-      <div className="flex gap-2 mb-4">
-        <button
-          onClick={() => setMode('single')}
-          className={`px-4 py-2 rounded-md font-medium transition-colors ${
-            mode === 'single'
-              ? 'bg-primary-600 text-white'
-              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-          }`}
-        >
-          Single URL
-        </button>
-        <button
-          onClick={() => setMode('bulk')}
-          className={`px-4 py-2 rounded-md font-medium transition-colors ${
-            mode === 'bulk'
-              ? 'bg-primary-600 text-white'
-              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-          }`}
-        >
-          Bulk Import
-        </button>
+    <div className="pc-card">
+      <div className="pc-card-head">
+        <div className="pc-card-title">Add URLs</div>
+        <div className="pc-mode-group">
+          <button
+            onClick={() => setMode('single')}
+            className={`pc-mode-btn ${mode === 'single' ? 'pc-mode-btn-active' : ''}`}
+            type="button"
+          >
+            Single
+          </button>
+          <button
+            onClick={() => setMode('bulk')}
+            className={`pc-mode-btn ${mode === 'bulk' ? 'pc-mode-btn-active' : ''}`}
+            type="button"
+          >
+            Bulk
+          </button>
+        </div>
       </div>
-      
-      {/* Input Fields */}
-      {mode === 'single' ? (
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Product URL
+
+      <div className="px-6 py-5 flex flex-col gap-4">
+        <div>
+          <label className="pc-flabel">{mode === 'single' ? 'Product URL' : 'URLs (one per line)'}</label>
+          {mode === 'single' ? (
+            <input
+              type="text"
+              value={singleURL}
+              onChange={(e) => setSingleURL(e.target.value)}
+              placeholder="https://example.com/product"
+              className="pc-field"
+              disabled={loading}
+              onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+            />
+          ) : (
+            <textarea
+              value={bulkURLs}
+              onChange={(e) => setBulkURLs(e.target.value)}
+              placeholder={'https://example.com/product1\nhttps://example.com/product2'}
+              rows={5}
+              className="pc-field font-mono text-xs leading-relaxed"
+              disabled={loading}
+            />
+          )}
+        </div>
+
+        <div>
+          <label className="pc-flabel">
+            Group <span className="font-normal text-primary-300">(optional)</span>
           </label>
           <input
             type="text"
-            value={singleURL}
-            onChange={(e) => setSingleURL(e.target.value)}
-            placeholder="https://www.example.com/product"
-            className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+            placeholder="e.g. Footwear, Electronics"
+            className="pc-field"
             disabled={loading}
           />
         </div>
-      ) : (
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            URLs (one per line)
-          </label>
-          <textarea
-            value={bulkURLs}
-            onChange={(e) => setBulkURLs(e.target.value)}
-            placeholder="https://www.example.com/product1&#10;https://www.example.com/product2&#10;https://www.example.com/product3"
-            rows={6}
-            className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500 focus:border-transparent font-mono text-sm"
-            disabled={loading}
-          />
-        </div>
-      )}
-      
-      {/* Group Name */}
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Group Name (Optional)
-        </label>
-        <input
-          type="text"
-          value={groupName}
-          onChange={(e) => setGroupName(e.target.value)}
-          placeholder="e.g., Electronics, Clothing"
-          className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+
+        {error && (
+          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            {error}
+          </div>
+        )}
+
+        <button
+          onClick={handleSubmit}
           disabled={loading}
-        />
+          className="pc-btn-primary justify-center"
+          type="button"
+        >
+          <Plus size={16} />
+          {loading ? 'Adding…' : 'Add URLs'}
+        </button>
       </div>
-      
-      {/* Error Message */}
-      {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-sm text-red-600">{error}</p>
-        </div>
-      )}
-      
-      {/* Submit Button */}
-      <button
-        onClick={handleSubmit}
-        disabled={loading}
-        className="w-full bg-primary-600 text-white px-6 py-3 rounded-md font-medium hover:bg-primary-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-      >
-        <Plus size={20} />
-        {loading ? 'Adding...' : 'Add URLs'}
-      </button>
     </div>
   );
 };

@@ -31,6 +31,8 @@ export interface ScanResult {
   error_message?: string;
   response_time?: number;
   scrape_method?: string;
+  /** First successful HTML fetch (playwright | scrapingbee | static) — debug */
+  html_primary_source?: string;
   variants?: Record<string, 'available' | 'unavailable'>;
   variants_checked?: boolean;
   unavailability_override?: boolean;
@@ -42,6 +44,21 @@ export interface Stats {
   available_count: number;
   unavailable_count: number;
   error_count: number;
+}
+
+export interface ScanJobStatus {
+  job_id: string;
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  total_urls: number;
+  completed: number;
+  success: number;
+  error: number;
+  rate_urls_per_sec?: number | null;
+  eta_seconds?: number | null;
+  last_update_at?: string | null;
 }
 
 // URL Management
@@ -75,6 +92,11 @@ export const runScan = async (url_ids?: string[]) => {
 
 export const getScanStatus = async (): Promise<{ scanning: boolean }> => {
   const response = await api.get('/api/scan/status');
+  return response.data;
+};
+
+export const getJobStatus = async (job_id: string) => {
+  const response = await api.get<ScanJobStatus>(`/api/scan/${job_id}/status`);
   return response.data;
 };
 

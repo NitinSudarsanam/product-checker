@@ -10,12 +10,12 @@ interface StatsCardProps {
 const StatsCard: React.FC<StatsCardProps> = ({ stats, loading }) => {
   if (loading || !stats) {
     return (
-      <div className="bg-white rounded-lg shadow-md p-6">
+      <div className="pc-card p-6">
         <div className="animate-pulse">
           <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="h-20 bg-gray-200 rounded"></div>
+              <div key={i} className="h-20 bg-gray-200 rounded-xl" />
             ))}
           </div>
         </div>
@@ -28,15 +28,15 @@ const StatsCard: React.FC<StatsCardProps> = ({ stats, loading }) => {
       label: 'Total URLs',
       value: stats.total_urls,
       icon: <Globe size={24} />,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-100',
+      color: 'text-primary-600',
+      bgColor: 'bg-primary-100',
     },
     {
       label: 'Total Scans',
       value: stats.total_scans,
       icon: <BarChart3 size={24} />,
-      color: 'text-purple-600',
-      bgColor: 'bg-purple-100',
+      color: 'text-blue-600',
+      bgColor: 'bg-blue-100',
     },
     {
       label: 'Available',
@@ -62,26 +62,21 @@ const StatsCard: React.FC<StatsCardProps> = ({ stats, loading }) => {
   ];
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
-      <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-        <BarChart3 size={24} />
-        Statistics
-      </h2>
-      
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {statItems.map((item, index) => (
           <div
             key={index}
-            className="flex flex-col items-center p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow"
+            className="bg-white rounded-[14px] px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.03)] flex items-center gap-3"
           >
-            <div className={`${item.bgColor} ${item.color} p-3 rounded-full mb-2`}>
+            <div className={`${item.bgColor} ${item.color} w-10 h-10 rounded-[11px] flex items-center justify-center flex-shrink-0`}>
               {item.icon}
             </div>
-            <p className="text-2xl font-bold text-gray-800">{item.value}</p>
-            <p className="text-sm text-gray-600 text-center">{item.label}</p>
+            <div>
+              <div className="text-[22px] font-bold leading-none text-gray-900">{item.value}</div>
+              <div className="text-[11px] text-gray-400 font-medium mt-1">{item.label}</div>
+            </div>
           </div>
         ))}
-      </div>
     </div>
   );
 };

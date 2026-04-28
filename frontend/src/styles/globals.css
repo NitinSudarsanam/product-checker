@@ -2,12 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
-}
-
 * {
   box-sizing: border-box;
   padding: 0;
@@ -21,10 +15,59 @@ body {
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
+  font-family: theme('fontFamily.sans');
+  background: #f5f4fb;
+  color: #111827;
+  min-height: 100vh;
 }
 
 a {
   color: inherit;
   text-decoration: none;
+}
+
+/* Scrollbars (match Product Checker.html) */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #ddd6fe; border-radius: 10px; }
+
+@layer components {
+  .pc-card { @apply bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.03)] overflow-hidden; }
+  .pc-card-head { @apply px-6 py-4 flex items-center justify-between border-b border-gray-50; }
+  .pc-card-title { @apply text-[14px] font-bold text-gray-900; }
+  .pc-card-count { @apply text-xs font-semibold text-primary-400 bg-primary-100 rounded-full px-2.5 py-0.5; }
+
+  .pc-btn { @apply inline-flex items-center gap-2 text-[13px] font-semibold rounded-xl px-4 py-2 transition disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.97]; }
+  .pc-btn-primary { @apply pc-btn text-white bg-gradient-to-br from-primary-600 to-fuchsia-500 shadow-[0_2px_8px_rgba(124,58,237,0.28)] hover:shadow-[0_4px_16px_rgba(124,58,237,0.38)]; }
+  .pc-btn-ghost { @apply pc-btn bg-white text-gray-700 border border-gray-200 hover:bg-[#faf8ff] hover:border-primary-300 hover:text-primary-600; }
+  .pc-btn-danger { @apply pc-btn bg-red-50 text-red-600 border border-red-200 hover:bg-red-100; }
+  .pc-btn-sm { @apply text-xs px-3 py-1.5 rounded-lg; }
+
+  .pc-field { @apply w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-[13px] text-gray-900 outline-none transition; }
+  .pc-field::placeholder { color: #c4b5fd; }
+  .pc-field:focus { @apply border-primary-300 ring-4 ring-primary-200/40; }
+  .pc-flabel { @apply block text-xs font-semibold text-gray-700 mb-1.5; }
+
+  .pc-pill { @apply inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full; }
+  .pc-pill-green  { @apply pc-pill bg-emerald-100 text-emerald-800; }
+  .pc-pill-red    { @apply pc-pill bg-red-100 text-red-800; }
+  .pc-pill-yellow { @apply pc-pill bg-yellow-100 text-yellow-800; }
+  .pc-pill-gray   { @apply pc-pill bg-gray-100 text-gray-600; }
+  .pc-pill-purple { @apply pc-pill bg-primary-100 text-primary-700; }
+  .pc-pill-blue   { @apply pc-pill bg-blue-100 text-blue-800; }
+
+  .pc-mode-group { @apply inline-flex bg-[#f5f4fb] rounded-xl p-1 gap-1; }
+  .pc-mode-btn { @apply text-xs font-semibold px-3.5 py-1.5 rounded-lg text-gray-400 transition; }
+  .pc-mode-btn-active { @apply bg-white text-primary-600 shadow-[0_1px_4px_rgba(0,0,0,0.08)]; }
+
+  .pc-tag { @apply inline-flex items-center gap-1 px-3 py-1 rounded-full border border-gray-200 bg-white text-xs font-semibold text-gray-500 transition; }
+  .pc-tag:hover { @apply border-primary-300 text-primary-600; }
+  .pc-tag-on { @apply bg-primary-100 border-primary-300 text-primary-600; }
+
+  /* Sidebar nav (matches the HTML file) */
+  .nav-item { @apply w-full text-left flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-medium text-gray-500 transition; }
+  .nav-item:hover { @apply bg-[#f5f4fb] text-primary-600; }
+  .nav-item.active { @apply bg-primary-100 text-primary-600 font-semibold; }
+  .nav-badge { @apply ml-auto bg-primary-100 text-primary-600 text-[10px] font-bold px-2 py-0.5 rounded-full; }
+  .nav-item.active .nav-badge { @apply bg-primary-200; }
 }
