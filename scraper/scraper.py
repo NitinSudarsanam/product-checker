@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Dict, Optional, Tuple
 from urllib.parse import urlparse
-from urllib.parse import urlparse
 import aiohttp
 from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeout
 from playwright_stealth import Stealth
@@ -33,6 +32,7 @@ try:
     SCRAPINGBEE_MAX_CONCURRENT = getattr(settings, "scrapingbee_max_concurrent", 5)
     SCRAPINGBEE_RPS = float(getattr(settings, "scrapingbee_rps", 0.0) or 0.0)
     SCRAPER_SCRAPINGBEE_FIRST = bool(getattr(settings, "scraper_scrapingbee_first", False))
+    SCRAPER_STATIC_SSL_VERIFY = bool(getattr(settings, "scraper_static_ssl_verify", True))
 except ImportError:
     HEADLESS = True
     SCRAPINGBEE_API_KEY = os.environ.get("SCRAPINGBEE_API_KEY", "")
@@ -47,6 +47,9 @@ except ImportError:
     except ValueError:
         SCRAPINGBEE_RPS = 0.0
     SCRAPER_SCRAPINGBEE_FIRST = os.environ.get("SCRAPER_SCRAPINGBEE_FIRST", "false").lower() in (
+        "1", "true", "yes",
+    )
+    SCRAPER_STATIC_SSL_VERIFY = os.environ.get("SCRAPER_STATIC_SSL_VERIFY", "true").lower() in (
         "1", "true", "yes",
     )
 
@@ -67,6 +70,41 @@ USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
+
+SCRAPER_STORAGE_STATE_DIR = os.environ.get(
+    "SCRAPER_STORAGE_STATE_DIR",
+    str(Path(__file__).parent / "storage_state"),
+).strip() or str(Path(__file__).parent / "storage_state")
+
+SCRAPER_SCREENSHOT_DIR = os.environ.get(
+    "SCRAPER_SCREENSHOT_DIR",
+    "",
+).strip()
+
+
+def _domain_key(url: str) -> str:
+    host = urlparse(url).netloc.lower().replace("www.", "")
+    parts = host.split(".")
+    if len(parts) >= 2:
+        return ".".join(parts[-2:])
+    return host or "unknown"
+
+
+def _storage_state_path_for(url: str) -> Path:
+    d = Path(SCRAPER_STORAGE_STATE_DIR)
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{_domain_key(url)}.json"
+
+
+def _screenshot_path_for(url: str, suffix: str) -> Optional[Path]:
+    if not SCRAPER_SCREENSHOT_DIR:
+        return None
+    d = Path(SCRAPER_SCREENSHOT_DIR)
+    d.mkdir(parents=True, exist_ok=True)
+    slug = url.replace("https://", "").replace("http://", "")
+    slug = "".join(c if c.isalnum() or c in "._-" else "_" for c in slug)[:140].strip("_") or "url"
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    return d / f"{ts}__{_domain_key(url)}__{slug}__{suffix}.png"
 
 _bee_executor = ThreadPoolExecutor(max_workers=SCRAPINGBEE_MAX_WORKERS, thread_name_prefix="scrapingbee")
 _scrapingbee_semaphore = asyncio.Semaphore(max(1, SCRAPINGBEE_MAX_CONCURRENT))
@@ -138,6 +176,11 @@ _BLOCK_PAGE_SNIPPETS = (
     "we couldnt find that page",
     "page not found",
     "access denied",
+    # Retailer-specific soft blocks / edge pages
+    "currently not available in your country",
+    "please contact the site administrator",
+    "oops!! something went wrong",
+    "there was an error processing your request",
 )
 
 
@@ -348,6 +391,49 @@ async def _discover_and_check_variants(page: Page, url: str) -> Dict[str, str]:
     except Exception as e:
         logger.error(f"Radio variant discovery error: {e}")
 
+    # ── ARIA LISTBOX VARIANTS (custom dropdowns) ────────────────────────────
+    # Some retailers render variants as <div role="listbox"> with <div role="option">.
+    # Probe a small number of options to keep the scan bounded.
+    try:
+        listboxes = await page.query_selector_all('[role="listbox"]')
+        # Keep it small; if we already found variants via select/radio, just do a quick pass.
+        max_listboxes = 2 if results else (1 if mega else 3)
+        max_options_per_listbox = 8 if mega else 10
+
+        for lb in listboxes[:max_listboxes]:
+            if len(results) >= max_variants:
+                break
+            try:
+                options = await lb.query_selector_all('[role="option"]')
+            except Exception:
+                options = []
+            if len(options) < 2:
+                continue
+
+            for opt in options[:max_options_per_listbox]:
+                if len(results) >= max_variants:
+                    break
+                try:
+                    label = (await opt.inner_text()) or ""
+                    label = " ".join(label.split()).strip()
+                    if not label:
+                        # fall back to aria-label
+                        label = (await opt.get_attribute("aria-label")) or ""
+                        label = " ".join(label.split()).strip()
+                    if not label:
+                        continue
+
+                    await opt.click()
+                    await page.wait_for_timeout(post_select_ms)
+                    enabled = await _buy_button_enabled_stable(page)
+                    # Avoid overwriting a more specific label discovered earlier
+                    if label not in results:
+                        results[label] = "available" if enabled else "unavailable"
+                except Exception as e:
+                    logger.debug(f"  listbox option click error: {e}")
+    except Exception as e:
+        logger.error(f"Listbox variant discovery error: {e}")
+
     return results
 
 
@@ -361,6 +447,7 @@ async def _playwright_scrape(url: str) -> Tuple[Optional[str], Dict[str, str], O
     context = None
     page = None
     mega = _is_megastore(url)
+    host = urlparse(url).netloc.lower()
     # Megastores: long nav budget (slow bot walls + heavy PDP JS)
     nav_timeout_ms = int(TIMEOUT * 1000 * (5 if mega else 1))
     async def _run(use_scrapingbee_proxy: bool) -> Tuple[Optional[str], Dict[str, str], Optional[bool]]:
@@ -384,13 +471,23 @@ async def _playwright_scrape(url: str) -> Tuple[Optional[str], Dict[str, str], O
                 }
 
             try:
-                browser = await p.chromium.launch(**launch_kwargs)
+                # Some sites intermittently fail in Chromium with net::ERR_HTTP2_PROTOCOL_ERROR.
+                # Use Firefox for better reliability on those domains.
+                use_firefox = any(d in host for d in ("staples.com", "officedepot.com"))
+                if use_firefox:
+                    ff_kwargs = {"headless": HEADLESS}
+                    if use_scrapingbee_proxy and SCRAPINGBEE_API_KEY:
+                        ff_kwargs["proxy"] = launch_kwargs.get("proxy")
+                    browser = await p.firefox.launch(**ff_kwargs)
+                else:
+                    browser = await p.chromium.launch(**launch_kwargs)
             except Exception as launch_err:
                 if ("Executable doesn't exist" in str(launch_err) or 'playwright install' in str(launch_err).lower()):
                     logger.error("Playwright browser not installed. Run: playwright install chromium")
                 raise
 
-            context = await browser.new_context(
+            state_path = _storage_state_path_for(url)
+            context_kwargs = dict(
                 user_agent=USER_AGENT,
                 viewport={'width': 1920, 'height': 1080},
                 locale='en-US',
@@ -404,6 +501,10 @@ async def _playwright_scrape(url: str) -> Tuple[Optional[str], Dict[str, str], O
                     'Upgrade-Insecure-Requests': '1',
                 }
             )
+            if state_path.exists():
+                context_kwargs["storage_state"] = str(state_path)
+
+            context = await browser.new_context(**context_kwargs)
 
             stealth = Stealth()
             for script in stealth.enabled_scripts:
@@ -423,14 +524,23 @@ async def _playwright_scrape(url: str) -> Tuple[Optional[str], Dict[str, str], O
             except Exception:
                 pass
             logger.info(f"Playwright navigating to {url}{' (via ScrapingBee proxy)' if use_scrapingbee_proxy else ''}")
-            await page.goto(url, wait_until="domcontentloaded", timeout=nav_timeout_ms)
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=nav_timeout_ms)
+            except Exception:
+                # Best-effort screenshot on navigation error
+                shot = _screenshot_path_for(url, "goto_error")
+                if shot is not None:
+                    try:
+                        await page.screenshot(path=str(shot), full_page=False)
+                    except Exception:
+                        pass
+                raise
 
             # Wait for buy button (specific to avoid "Add to wishlist" false-match)
             btn_wait = 8000 if mega else 5000
             try:
-                host = urlparse(url).netloc.lower()
-                host = urlparse(url).netloc.lower()
-                if any(d in host for d in ("kohls.com", "lowes.com", "officedepot.com", "overstock.com", "staples.com")):
+                host_for_wait = urlparse(url).netloc.lower()
+                if any(d in host_for_wait for d in ("kohls.com", "lowes.com", "officedepot.com", "overstock.com", "staples.com")):
                     # These retailers can hydrate the CTA after DOMContentLoaded.
                     # Do a best-effort wait on common ATC hooks before taking the HTML snapshot.
                     try:
@@ -468,6 +578,12 @@ async def _playwright_scrape(url: str) -> Tuple[Optional[str], Dict[str, str], O
                 title = ""
             block_reason = _looks_blocked_html(url, html_content or "", title)
             if block_reason:
+                shot = _screenshot_path_for(url, f"blocked_{block_reason}")
+                if shot is not None:
+                    try:
+                        await page.screenshot(path=str(shot), full_page=False)
+                    except Exception:
+                        pass
                 logger.warning(f"Playwright blocked/challenge page for {url}: {block_reason}")
                 return None, {}, live_buy_at_html
 
@@ -501,6 +617,32 @@ async def _playwright_scrape(url: str) -> Tuple[Optional[str], Dict[str, str], O
     try:
         async with _playwright_semaphore:
             html_content, variant_results, live_buy_at_html = await _run(use_scrapingbee_proxy=False)
+
+            # If we're blocked/edge-paged, retry once with a fresh context (ignore storage_state)
+            if html_content is None:
+                try:
+                    fresh = os.environ.get("SCRAPER_RETRY_FRESH_CONTEXT", "true").lower() in ("1", "true", "yes")
+                    if fresh:
+                        # Temporarily move aside any storage_state file for this call.
+                        st = _storage_state_path_for(url)
+                        tmp = st.with_suffix(st.suffix + ".bak_temp_retry")
+                        moved = False
+                        if st.exists():
+                            try:
+                                st.replace(tmp)
+                                moved = True
+                            except Exception:
+                                moved = False
+                        try:
+                            html_content, variant_results, live_buy_at_html = await _run(use_scrapingbee_proxy=False)
+                        finally:
+                            if moved and tmp.exists() and not st.exists():
+                                try:
+                                    tmp.replace(st)
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
 
             # If we're blocked on tough sites, retry once through ScrapingBee proxy-mode.
             if (html_content is None) and ("walmart" in urlparse(url).netloc.lower() or "target" in urlparse(url).netloc.lower()):
@@ -632,7 +774,10 @@ async def fetch_static_html(url: str, session: aiohttp.ClientSession) -> Optiona
         async with session.get(
             url, headers=headers,
             timeout=aiohttp.ClientTimeout(total=TIMEOUT),
-            allow_redirects=True
+            allow_redirects=True,
+            # Some networks inject a MITM certificate (common on corporate Wi-Fi).
+            # Keep verification on by default; allow override via env for local testing.
+            ssl=SCRAPER_STATIC_SSL_VERIFY,
         ) as response:
             if response.status == 200:
                 return await response.text()
@@ -665,6 +810,7 @@ async def scrape_url(url: str, use_playwright: bool = True) -> Dict:
         "response_time": None,
         "scrape_method": None,
         "html_primary_source": None,
+        "blocked_reason": None,
         "variants": {},           # {label: "available"|"unavailable"}
         "variants_checked": False,
     }
@@ -740,8 +886,10 @@ async def scrape_url(url: str, use_playwright: bool = True) -> Dict:
             result["status"] = "error"
             return result
 
-        if _looks_blocked_html(url, html_content):
-            result["error_message"] = "Blocked/challenge page HTML (robot wall / captcha)"
+        blocked = _looks_blocked_html(url, html_content)
+        if blocked:
+            result["blocked_reason"] = blocked
+            result["error_message"] = f"blocked:{blocked}"
             result["status"] = "error"
             return result
 

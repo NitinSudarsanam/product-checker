@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import List
+from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
 
@@ -23,14 +24,19 @@ async def _shot(url: str, out_dir: Path, *, timeout_ms: int, full_page: bool) ->
     out_path = out_dir / f"{ts}__{_slug(url)}.png"
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-            ],
-        )
+        host = (urlparse(url).netloc or "").lower()
+        use_firefox = any(d in host for d in ("staples.com", "officedepot.com"))
+        if use_firefox:
+            browser = await p.firefox.launch(headless=True)
+        else:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
+                ],
+            )
         context = await browser.new_context(
             viewport={"width": 1400, "height": 900},
             locale="en-US",

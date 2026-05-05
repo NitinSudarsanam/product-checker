@@ -111,6 +111,75 @@
         ],
         "text": ["Add to Cart", "Add To Cart", "ADD TO CART"]
       },
+      "kohls.com": {
+        "selectors": [
+          "button[id*='add-to-cart']",
+          "button[id*='addToCart']",
+          "button[data-testid*='add-to-cart']",
+          "button[data-test*='add-to-cart']",
+          "button[aria-label*='Add to Cart']",
+          "button[aria-label*='Add to cart']",
+          "button:has-text('Add to Cart')",
+          "button:has-text('Add to Bag')",
+          "[data-automation-id*='add-to-cart']"
+        ],
+        "text": ["Add to Cart", "Add to cart", "Add to Bag", "Add to bag"]
+      },
+      "lowes.com": {
+        "selectors": [
+          "button[id*='add-to-cart']",
+          "button[data-testid*='add-to-cart']",
+          "button[data-test*='add-to-cart']",
+          "button[aria-label*='Add to Cart']",
+          "button[aria-label*='Add to cart']",
+          "button:has-text('Add to Cart')",
+          "button:has-text('Add to Bag')",
+          "button[name='add']"
+        ],
+        "text": ["Add to Cart", "Add to cart", "Add to Bag", "Add to bag"]
+      },
+      "officedepot.com": {
+        "selectors": [
+          "button[id*='add-to-cart']",
+          "button[class*='add-to-cart']",
+          "button[data-testid*='add-to-cart']",
+          "button[data-test*='add-to-cart']",
+          "button[aria-label*='Add to Cart']",
+          "button[aria-label*='Add to cart']",
+          "button:has-text('Add to Cart')",
+          "button:has-text('Add to Bag')",
+          "button[name='add']"
+        ],
+        "text": ["Add to Cart", "Add to cart", "Add to Bag", "Add to bag"]
+      },
+      "overstock.com": {
+        "selectors": [
+          "button[id*='add-to-cart']",
+          "button[class*='add-to-cart']",
+          "button[data-testid*='add-to-cart']",
+          "button[data-test*='add-to-cart']",
+          "button[aria-label*='Add to Cart']",
+          "button[aria-label*='Add to cart']",
+          "button:has-text('Add to Cart')",
+          "button:has-text('Add to Bag')",
+          "button[name='add']"
+        ],
+        "text": ["Add to Cart", "Add to cart", "Add to Bag", "Add to bag"]
+      },
+      "staples.com": {
+        "selectors": [
+          "button[id*='add-to-cart']",
+          "button[class*='add-to-cart']",
+          "button[data-testid*='add-to-cart']",
+          "button[data-test*='add-to-cart']",
+          "button[aria-label*='Add to Cart']",
+          "button[aria-label*='Add to cart']",
+          "button:has-text('Add to Cart')",
+          "button:has-text('Add to Bag')",
+          "button[name='add']"
+        ],
+        "text": ["Add to Cart", "Add to cart", "Add to Bag", "Add to bag"]
+      },
       "bestbuy.com": {
         "selectors": [
           "button.add-to-cart-button",
@@ -197,6 +266,61 @@
       "target.com": {
         "selectors": ["button[data-test='buyNowButton']"],
         "text": ["Buy Now"]
+      },
+      "kohls.com": {
+        "selectors": [
+          "button[id*='buy-now']",
+          "button[data-testid*='buy-now']",
+          "button[data-test*='buy-now']",
+          "button[aria-label*='Buy Now']",
+          "button:has-text('Buy Now')",
+          "button:has-text('Checkout')"
+        ],
+        "text": ["Buy Now", "Checkout"]
+      },
+      "lowes.com": {
+        "selectors": [
+          "button[id*='buy-now']",
+          "button[data-testid*='buy-now']",
+          "button[data-test*='buy-now']",
+          "button[aria-label*='Buy Now']",
+          "button:has-text('Buy Now')",
+          "button:has-text('Checkout')"
+        ],
+        "text": ["Buy Now", "Checkout"]
+      },
+      "officedepot.com": {
+        "selectors": [
+          "button[id*='buy-now']",
+          "button[data-testid*='buy-now']",
+          "button[data-test*='buy-now']",
+          "button[aria-label*='Buy Now']",
+          "button:has-text('Buy Now')",
+          "button:has-text('Checkout')"
+        ],
+        "text": ["Buy Now", "Checkout"]
+      },
+      "overstock.com": {
+        "selectors": [
+          "button[id*='buy-now']",
+          "button[data-testid*='buy-now']",
+          "button[data-test*='buy-now']",
+          "button[aria-label*='Buy Now']",
+          "button:has-text('Buy Now')",
+          "button:has-text('Checkout')"
+        ],
+        "text": ["Buy Now", "Checkout"]
+      },
+      "staples.com": {
+        "selectors": [
+          "button[id*='buy-now']",
+          "button[data-testid*='buy-now']",
+          "button[data-test*='buy-now']",
+          "button[aria-label*='Buy Now']",
+          "button:has-text('Buy Now')",
+          "button:has-text('Checkout')"
+        ],
+        "text": ["Buy Now", "Checkout"]
       },
       "bestbuy.com": {
         "selectors": ["button.buy-now-button"],

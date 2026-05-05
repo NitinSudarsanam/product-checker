@@ -194,6 +194,54 @@ class ButtonDetector:
                 except Exception:
                     continue
 
+        if "homedepot.com" in domain:
+            for sel in ("#root", "#thd-pdp", "#mainContent", "main", '[data-testid*="add-to-cart"]'):
+                try:
+                    for el in soup.select(sel):
+                        add_el(el)
+                except Exception:
+                    continue
+
+        if "kohls.com" in domain:
+            for sel in ("#mainContent", "#productDetails", "#product-details", "main", '[data-testid*="pdp"]'):
+                try:
+                    for el in soup.select(sel):
+                        add_el(el)
+                except Exception:
+                    continue
+
+        if "lowes.com" in domain:
+            for sel in ("#mainContent", "#main", "main", "article", '[data-testid*="add-to-cart"]', '[data-test*="add-to-cart"]'):
+                try:
+                    for el in soup.select(sel):
+                        add_el(el)
+                except Exception:
+                    continue
+
+        if "officedepot.com" in domain:
+            for sel in ("#main", "#mainContent", "#main-content", "main", "article", '[data-testid*="add-to-cart"]'):
+                try:
+                    for el in soup.select(sel):
+                        add_el(el)
+                except Exception:
+                    continue
+
+        if "overstock.com" in domain:
+            for sel in ("#main", "#mainContent", "#main-content", "main", "article", '[data-testid*="add-to-cart"]'):
+                try:
+                    for el in soup.select(sel):
+                        add_el(el)
+                except Exception:
+                    continue
+
+        if "staples.com" in domain:
+            for sel in ("#main", "#mainContent", "#main-content", "main", "article", '[data-testid*="add-to-cart"]'):
+                try:
+                    for el in soup.select(sel):
+                        add_el(el)
+                except Exception:
+                    continue
+
         if not regions:
 
             def _class_text(c) -> str:
