@@ -119,6 +119,7 @@ class ScanResult(BaseModel):
     add_to_cart: bool = False
     buy_now: bool = False
     status: str  # "available", "unavailable", "error"
+    blocked_reason: Optional[str] = None
     error_message: Optional[str] = None
     response_time: Optional[float] = None
     scrape_method: Optional[str] = None
@@ -165,6 +166,9 @@ class ScanJobStatus(BaseModel):
     completed: int = 0
     success: int = 0
     error: int = 0
+    available_count: int = 0
+    unavailable_count: int = 0
+    availability_summary: Optional[str] = None  # all_available|some_unavailable|none_available|unknown
     rate_urls_per_sec: Optional[float] = None
     eta_seconds: Optional[int] = None
     last_update_at: Optional[datetime] = None

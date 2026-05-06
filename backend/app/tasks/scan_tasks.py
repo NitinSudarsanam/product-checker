@@ -58,6 +58,25 @@ def _compute_progress_fields(job: Dict[str, Any]) -> Dict[str, Any]:
     return {"rate_urls_per_sec": round(rate, 3), "eta_seconds": eta}
 
 
+def _compute_availability_summary(job: Dict[str, Any]) -> str:
+    """
+    Summarize availability over successfully scraped URLs only:
+    - all_available: all successful are available
+    - none_available: all successful are unavailable
+    - some_unavailable: mix of available/unavailable among successes
+    - unknown: no successful results yet (or all errors)
+    """
+    available = int(job.get("available_count") or 0)
+    unavailable = int(job.get("unavailable_count") or 0)
+    success_total = available + unavailable
+    if success_total <= 0:
+        return "unknown"
+    if available == success_total:
+        return "all_available"
+    if unavailable == success_total:
+        return "none_available"
+    return "some_unavailable"
+
 def _finalize_job_if_done(db, job_id: str):
     job = db.scan_jobs.find_one({"job_id": job_id})
     if not job:
@@ -150,9 +169,16 @@ def scrape_one_url(job_id: str, url_id: str, url: str):
 
         method = (scan_data.get("scrape_method") or "").lower()
         method_inc = {f"method_counts.{method}": 1} if method in {"scrapingbee", "playwright", "static"} else {}
+        status = str(scan_data.get("status") or "").lower()
+        avail_inc: Dict[str, int] = {}
+        if status == "available":
+            avail_inc["available_count"] = 1
+        elif status == "unavailable":
+            avail_inc["unavailable_count"] = 1
+
         db.scan_jobs.update_one(
             {"job_id": job_id},
-            {"$inc": {"completed": 1, "success": 1, **method_inc}, "$set": {"last_update_at": datetime.utcnow()}},
+            {"$inc": {"completed": 1, "success": 1, **avail_inc, **method_inc}, "$set": {"last_update_at": datetime.utcnow()}},
         )
 
     except (TimeoutError, AsyncioTimeoutError):
@@ -213,6 +239,7 @@ def scrape_one_url(job_id: str, url_id: str, url: str):
     job = db.scan_jobs.find_one({"job_id": job_id})
     if job:
         derived = _compute_progress_fields(job)
+        derived["availability_summary"] = _compute_availability_summary(job)
         db.scan_jobs.update_one(
             {"job_id": job_id},
             {"$set": {**derived, "last_update_at": datetime.utcnow()}},
