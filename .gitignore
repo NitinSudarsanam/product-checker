@@ -52,3 +52,9 @@ logs/
 
 # Playwright
 playwright/.cache/
+
+# Scraper output: session cookies, screenshots, HTML dumps
+scraper/storage_state/
+scraper/test_artifacts/
+scraper/bench_artifacts*/
+scraper/screenshots/

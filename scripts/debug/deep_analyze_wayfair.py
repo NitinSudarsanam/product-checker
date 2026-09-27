@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
-sys.path.insert(0, str(Path(__file__).parent / "scraper"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scraper"))
 
 async def deep_analyze_wayfair():
     url = "https://www.wayfair.com/furniture/pdp/latitude-run-sargon-upholstered-low-profile-standard-bed-w003780954.html"

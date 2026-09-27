@@ -3,14 +3,14 @@ import sys
 from pathlib import Path
 from bs4 import BeautifulSoup
 
-sys.path.insert(0, str(Path(__file__).parent / "scraper"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scraper"))
 from scraper import fetch_dynamic_html
 from detector import ButtonDetector
 
 async def analyze():
-    url = "https://www.wayfair.com/furniture/pdp/hokku-designs-ziera-6-piece-power-reclining-sectional-with-lay-back-chaise-and-1-reclining-seat-pv10427.html?piid=97582790"
+    url = "https://www.walmart.com/ip/Winfita-Treadmill-15-Levels-Auto-Incline-4HP-300LBS-Capacity-Electric-Treadmill-Home-Portable-0-6-10MPH-Speed-Easy-Assembly-Pulse-Sensor-Digital-Disp/8108917378"
     
-    print("Fetching Wayfair page...")
+    print("Fetching Walmart page...")
     html = await fetch_dynamic_html(url)
     
     if not html:
@@ -38,12 +38,10 @@ async def analyze():
         if 'add' in text:
             print(f"\nButton text: '{btn.get_text().strip()[:80]}'")
             # Show key attributes
-            if btn.get('data-enzyme-id'):
-                print(f"  data-enzyme-id: {btn.get('data-enzyme-id')}")
-            if btn.get('data-hb-id'):
-                print(f"  data-hb-id: {btn.get('data-hb-id')}")
-            if btn.get('data-testid'):
-                print(f"  data-testid: {btn.get('data-testid')}")
+            if btn.get('data-automation-id'):
+                print(f"  data-automation-id: {btn.get('data-automation-id')}")
+            if btn.get('data-tl-id'):
+                print(f"  data-tl-id: {btn.get('data-tl-id')}")
             if btn.get('id'):
                 print(f"  id: {btn.get('id')}")
             if btn.get('class'):
@@ -51,15 +49,15 @@ async def analyze():
             if btn.get('aria-label'):
                 print(f"  aria-label: {btn.get('aria-label')}")
     
-    # Look for any element with text "Add to Cart"
-    print("\n\nSearching for ANY element with 'Add to Cart' text:")
-    for elem in soup.find_all(text=lambda t: t and 'add to cart' in t.lower()):
+    # Look for any element with text "Add to cart"
+    print("\n\nSearching for ANY element with 'Add to cart' or 'Add to Cart' text:")
+    for elem in soup.find_all(string=lambda t: t and 'add to cart' in t.lower()):
         parent = elem.parent
         print(f"\nFound in <{parent.name}>: '{elem.strip()[:60]}'")
-        if parent.get('data-enzyme-id'):
-            print(f"  data-enzyme-id: {parent.get('data-enzyme-id')}")
-        if parent.get('data-hb-id'):
-            print(f"  data-hb-id: {parent.get('data-hb-id')}")
+        if parent.get('data-automation-id'):
+            print(f"  data-automation-id: {parent.get('data-automation-id')}")
+        if parent.get('data-tl-id'):
+            print(f"  data-tl-id: {parent.get('data-tl-id')}")
         if parent.get('class'):
             print(f"  classes: {' '.join(parent.get('class')[:3])}")
 

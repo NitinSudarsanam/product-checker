@@ -2,7 +2,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / "scraper"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scraper"))
 
 from scraper import fetch_dynamic_html
 from detector import ButtonDetector

@@ -4,7 +4,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 # Add scraper to path
-sys.path.insert(0, str(Path(__file__).parent / "scraper"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scraper"))
 from scraper import scrape_url
 
 async def debug_wayfair():
