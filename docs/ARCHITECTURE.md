@@ -1,547 +1,146 @@
-# 🎨 System Architecture & Diagrams
+# Architecture
 
-## 📐 High-Level Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         USER BROWSER                            │
-│                    (http://localhost:3000)                      │
-└────────────┬────────────────────────────────────────────────────┘
-             │
-             │ HTTP/REST
-             ▼
-┌────────────────────────────────────────────────────────────────┐
-│                    FRONTEND (Next.js + React)                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐        │
-│  │  URL Input   │  │   Results    │  │  Statistics  │        │
-│  │  Component   │  │    Table     │  │   Dashboard  │        │
-│  └──────────────┘  └──────────────┘  └──────────────┘        │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐ │
-│  │              API Client (axios)                          │ │
-│  └──────────────────────────────────────────────────────────┘ │
-└────────────┬───────────────────────────────────────────────────┘
-             │
-             │ HTTP/REST API Calls
-             ▼
-┌────────────────────────────────────────────────────────────────┐
-│                    BACKEND (FastAPI)                            │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐        │
-│  │  URLs API    │  │   Scan API   │  │   Logs API   │        │
-│  │  /api/urls   │  │  /api/scan   │  │  /api/logs   │        │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘        │
-│         │                  │                  │                 │
-│         └──────────────────┼──────────────────┘                │
-│                            │                                    │
-│  ┌─────────────────────────▼──────────────────────────────┐   │
-│  │              Business Logic Layer                       │   │
-│  │  - Input Validation                                     │   │
-│  │  - Error Handling                                       │   │
-│  │  - Logging                                              │   │
-│  └─────────────────────────┬──────────────────────────────┘   │
-└────────────────────────────┼───────────────────────────────────┘
-                             │
-            ┌────────────────┼────────────────┐
-            │                │                │
-            ▼                ▼                ▼
-┌────────────────┐  ┌────────────────┐  ┌────────────────┐
-│   SCRAPER      │  │    MONGODB     │  │    LOGGER      │
-│   ENGINE       │  │    DATABASE    │  │    SYSTEM      │
-│                │  │                │  │                │
-│ • BeautifulSoup│  │ • urls         │  │ • File logs    │
-│ • Playwright   │  │ • scan_results │  │ • DB logs      │
-│ • Detector     │  │ • logs         │  │ • Console      │
-└────────────────┘  └────────────────┘  └────────────────┘
-```
-
----
-
-## 🔄 Data Flow Diagrams
-
-### Adding URLs Flow
+## Components
 
 ```
-┌─────────┐
-│  User   │
-│ enters  │
-│  URLs   │
-└────┬────┘
-     │
-     ▼
-┌──────────────────┐
-│  URLInput.tsx    │
-│  - Validates     │
-│  - Formats       │
-└────┬─────────────┘
-     │
-     │ api.addURLs()
-     ▼
-┌──────────────────┐
-│  api.ts          │
-│  POST request    │
-└────┬─────────────┘
-     │
-     │ HTTP POST /api/urls/add
-     ▼
-┌──────────────────┐
-│  urls.py         │
-│  - Sanitize      │
-│  - Check dupes   │
-└────┬─────────────┘
-     │
-     │ db.urls.insert_many()
-     ▼
-┌──────────────────┐
-│  MongoDB         │
-│  urls collection │
-└────┬─────────────┘
-     │
-     │ Response
-     ▼
-┌──────────────────┐
-│  Frontend        │
-│  - Update state  │
-│  - Show success  │
-│  - Refresh list  │
-└──────────────────┘
+Browser (localhost:3000)
+   │  HTTP, polls job status every 5 s
+   ▼
+Frontend ── Next.js + React (frontend/src)
+   │  axios → NEXT_PUBLIC_API_URL (localhost:8080)
+   ▼
+Backend API ── FastAPI (backend/app)
+   │  reads/writes MongoDB (Motor, async)
+   │  POST /api/scan/run → creates scan_jobs doc, sends Celery task
+   ▼
+Redis ── Celery broker + result backend
+   │
+   ▼
+Worker ── Celery (backend/app/tasks/scan_tasks.py)
+   │  one scrape_one_url task per URL
+   │  calls scraper.scrape_url(), writes results with PyMongo (sync)
+   ▼
+Scraper ── scraper/scraper.py + scraper/detector.py
+   │  Playwright (Chromium, Firefox for a few sites) → ScrapingBee → plain HTTP
+   ▼
+Retailer product pages
 ```
 
-### Scanning Flow
+The API process imports the scraper package but never runs a scrape itself. All scraping happens in worker processes, so a slow or hung page can't tie up the API.
 
-```
-┌─────────┐
-│  User   │
-│ clicks  │
-│  "Scan" │
-└────┬────┘
-     │
-     ▼
-┌──────────────────┐
-│  index.tsx       │
-│  runScan()       │
-└────┬─────────────┘
-     │
-     │ api.runScan()
-     ▼
-┌──────────────────┐
-│  api.ts          │
-│  POST request    │
-└────┬─────────────┘
-     │
-     │ HTTP POST /api/scan/run
-     ▼
-┌──────────────────┐
-│  scan.py         │
-│  - Get URLs      │
-│  - Start task    │
-└────┬─────────────┘
-     │
-     │ For each URL
-     ▼
-┌──────────────────┐
-│  scraper.py      │
-│  - Fetch HTML    │
-│  - Parse DOM     │
-└────┬─────────────┘
-     │
-     │ HTML content
-     ▼
-┌──────────────────┐
-│  detector.py     │
-│  - Match rules   │
-│  - Find buttons  │
-└────┬─────────────┘
-     │
-     │ Detection result
-     ▼
-┌──────────────────┐
-│  scan.py         │
-│  - Format result │
-│  - Save to DB    │
-└────┬─────────────┘
-     │
-     │ db.scan_results.insert()
-     ▼
-┌──────────────────┐
-│  MongoDB         │
-│  scan_results    │
-└────┬─────────────┘
-     │
-     │ Frontend polls
-     ▼
-┌──────────────────┐
-│  ResultsTable    │
-│  - Display data  │
-│  - Show status   │
-└──────────────────┘
-```
+## Scan lifecycle
 
----
+1. **Start.** The frontend calls `POST /api/scan/run`, optionally with a list of `url_ids`. The API checks the IDs, inserts a `scan_jobs` document with `status: "queued"` and a new `job_id`, sends the `enqueue_scan` Celery task, and returns the `job_id` right away.
+2. **Fan out.** `enqueue_scan` sets the job to `running`, loads the URLs, records `total_urls`, and queues one `scrape_one_url` task per URL.
+3. **Scrape.** Each `scrape_one_url`:
+   - skips the work if the job was cancelled,
+   - runs `scrape_url()` inside `asyncio.wait_for` with a per-URL time budget,
+   - inserts a `scan_results` document (including errors and timeouts),
+   - increments the job's counters (`completed`, `success` or `error`, `available_count`, `unavailable_count`, `method_counts.<method>`),
+   - recalculates `rate_urls_per_sec`, `eta_seconds`, and `availability_summary`,
+   - marks the job `done` once `completed == total_urls`.
+4. **Poll.** The frontend calls `GET /api/scan/{job_id}/status` every 5 seconds (for up to 30 minutes) and shows progress. When the job reaches `done`, `failed`, or `cancelled`, it reloads `GET /api/scan/results/latest`.
 
-## 🔌 Component Interactions
+### Timeouts
 
-### Frontend Components
+Three layers stop a single URL from running forever:
 
-```
-index.tsx (Main Page)
-│
-├── URLInput.tsx
-│   ├── Input fields
-│   ├── Validation logic
-│   └── Submit handler → api.addURLs()
-│
-├── URLList.tsx
-│   ├── Fetch URLs → api.getURLs()
-│   ├── Display table
-│   └── Delete handler → api.deleteURL()
-│
-├── ResultsTable.tsx
-│   ├── Fetch results → api.getLatestResults()
-│   ├── Display results
-│   └── Status indicators
-│
-└── StatsCard.tsx
-    ├── Fetch stats → api.getStats()
-    └── Display metrics
-```
+| Layer | Default | Where |
+|-------|---------|-------|
+| Page navigation | `SCRAPER_TIMEOUT` (30 s), 5× for Amazon and Walmart | `_playwright_scrape` |
+| Variant probing | 45 s (30 s for Amazon and Walmart) | `_playwright_scrape` |
+| Whole URL | `max(timeout + 60, timeout × 12 + 180)` = 540 s | `scrape_one_url` (`asyncio.wait_for`) |
+| Celery soft / hard limit | 1080 s / 1200 s | `scrape_one_url` task options |
 
-### Backend Endpoints
+Celery is configured with `task_acks_late` and `task_reject_on_worker_lost`, so if a worker process dies mid-task, the task goes back on the queue instead of disappearing.
 
-```
-main.py (FastAPI App)
-│
-├── /api/urls/* (urls.py)
-│   ├── POST /add → Add URLs
-│   ├── GET / → List URLs
-│   ├── GET /{id} → Get URL
-│   ├── DELETE /{id} → Delete URL
-│   └── DELETE / → Delete all
-│
-├── /api/scan/* (scan.py)
-│   ├── POST /run → Start scan
-│   ├── GET /results → Get results
-│   ├── GET /results/latest → Latest results
-│   └── DELETE /results → Clear results
-│
-└── /api/logs/* (logs.py)
-    ├── GET / → Get logs
-    ├── DELETE / → Clear logs
-    └── GET /stats → Get statistics
-```
+## Scraper
 
----
+`scrape_url(url)` in `scraper/scraper.py`:
 
-## 🗄️ Database Schema
+1. **Fetch HTML.** Tries each method until one returns a page that isn't a block page:
+   - **Playwright** (default first). Launches Chromium (Firefox for Staples and Office Depot, which hit HTTP/2 errors in Chromium), applies stealth scripts, loads saved cookies from `scraper/storage_state/<domain>.json`, skips images, fonts, and media, waits for a buy button, and grabs the HTML. It also records whether a buy button is actually clickable in the live page, then probes variants. If blocked, it retries once without saved cookies, and for Walmart and Target once more through ScrapingBee's proxy.
+   - **ScrapingBee** (only if `SCRAPINGBEE_API_KEY` is set). Returns rendered HTML from a residential IP. No variant checks.
+   - **Plain HTTP** (aiohttp). No JavaScript, no variant checks.
+   - With `SCRAPER_SCRAPINGBEE_FIRST=true`, ScrapingBee is tried before Playwright.
+2. **Block check.** `_looks_blocked_html()` looks for phrases like "robot or human", "captcha", "access denied", and "page not found". A match makes the result `error` with `error_message: "blocked:<phrase>"`.
+3. **Detect.** `detector.detect_all_buttons()` parses the HTML and decides `add_to_cart`, `buy_now`, and `status`.
+4. **Combine.** Variant results win over HTML detection. The live-page button check can overrule the HTML. Wayfair results from ScrapingBee get a second opinion from Playwright. See [DETECTION_EXPLAINED.md](DETECTION_EXPLAINED.md).
 
-```
-MongoDB: ubique_product_checker
-│
-├── Collection: urls
-│   ├── _id: ObjectId (PK)
-│   ├── url: String (unique)
-│   ├── created_at: DateTime
-│   └── group_name: String (optional)
-│
-├── Collection: scan_results
-│   ├── _id: ObjectId (PK)
-│   ├── url: String
-│   ├── url_id: String (FK to urls._id)
-│   ├── scanned_at: DateTime
-│   ├── add_to_cart: Boolean
-│   ├── buy_now: Boolean
-│   ├── status: String (available/unavailable/error)
-│   ├── error_message: String (optional)
-│   └── response_time: Float
-│
-└── Collection: logs
-    ├── _id: ObjectId (PK)
-    ├── event_type: String
-    ├── details: Object
-    ├── timestamp: DateTime
-    └── level: String (INFO/WARNING/ERROR)
-```
+Concurrency inside one worker process is capped by semaphores: `PLAYWRIGHT_MAX_CONCURRENT` (2) browsers and `SCRAPINGBEE_MAX_CONCURRENT` (5) ScrapingBee calls.
 
----
+## Database
 
-## 🔍 Scraper Engine Architecture
+MongoDB database `ubique_product_checker`. Indexes are created when the API starts (`backend/app/database.py`).
 
-```
-scraper.py (Main Controller)
-│
-├── fetch_static_html()
-│   ├── Use: aiohttp
-│   ├── For: Simple HTML pages
-│   └── Fast but limited
-│
-├── fetch_dynamic_html()
-│   ├── Use: Playwright
-│   ├── For: JavaScript-heavy sites
-│   └── Slower but comprehensive
-│
-└── scrape_url()
-    ├── Try Playwright first
-    ├── Fallback to static
-    └── Pass HTML to detector
-    
-detector.py (Detection Engine)
-│
-├── Load detection_rules.json
-│
-├── detect_button(html, url, type)
-│   ├── Parse HTML with BeautifulSoup
-│   ├── Check domain-specific rules
-│   ├── Try CSS selectors
-│   ├── Try text patterns
-│   └── Return result
-│
-└── detect_all_buttons()
-    ├── Detect "Add to Cart"
-    ├── Detect "Buy Now"
-    └── Determine overall status
+### `urls`
 
-detection_rules.json (Configuration)
-│
-├── add_to_cart
-│   ├── css_selectors: []
-│   ├── text_patterns: []
-│   └── domains: {}
-│
-├── buy_now
-│   ├── css_selectors: []
-│   ├── text_patterns: []
-│   └── domains: {}
-│
-└── settings
-    ├── case_sensitive
-    ├── partial_match
-    └── timeout
-```
+| Field | Type | Notes |
+|-------|------|-------|
+| `_id` | ObjectId | |
+| `url` | string | unique index |
+| `created_at` | datetime | |
+| `group_name` | string, optional | |
 
----
+### `scan_results`
 
-## 🐳 Docker Container Architecture
+One document per URL per scan. Indexed on `url`, `url_id`, and `scanned_at`.
 
-```
-docker-compose.yml
-│
-├── Network: ubique-network
-│   └── Bridge network for inter-container communication
-│
-├── Service: mongodb
-│   ├── Image: mongo:7.0
-│   ├── Port: 27017
-│   ├── Volume: mongodb_data
-│   └── Database: ubique_product_checker
-│
-├── Service: backend
-│   ├── Build: ./backend/Dockerfile
-│   ├── Port: 8000
-│   ├── Depends: mongodb
-│   ├── Volumes:
-│   │   ├── ./backend/logs:/app/logs
-│   │   └── ./scraper:/app/scraper
-│   └── Environment:
-│       ├── MONGODB_URL
-│       ├── SCRAPER_TIMEOUT
-│       └── LOG_LEVEL
-│
-└── Service: frontend
-    ├── Build: ./frontend/Dockerfile
-    ├── Port: 3000
-    ├── Depends: backend
-    └── Environment:
-        └── NEXT_PUBLIC_API_URL
-```
+| Field | Type | Notes |
+|-------|------|-------|
+| `url`, `url_id` | string | `url_id` is the string form of `urls._id` |
+| `job_id` | string | the scan job that produced it |
+| `scanned_at` | datetime | UTC |
+| `status` | string | `available`, `unavailable`, or `error` |
+| `add_to_cart`, `buy_now` | bool | |
+| `error_message` | string, optional | e.g. `blocked:captcha`, `Scan timed out after 540s` |
+| `response_time` | float | seconds |
+| `scrape_method` | string | method behind the final result: `playwright`, `scrapingbee`, `static`, or `error` |
+| `html_primary_source` | string | method that returned HTML first |
+| `variants` | object | `{label: "available" \| "unavailable"}` |
+| `variants_checked` | bool | |
+| `unavailability_override` | bool | "out of stock" wording forced `unavailable` |
 
----
+### `scan_jobs`
 
-## 📊 Request/Response Cycle
+One document per scan. Unique index on `job_id`, plus `created_at` and `status`.
 
-### Example: Running a Scan
+| Field | Notes |
+|-------|-------|
+| `job_id`, `status` | status is `queued`, `running`, `done`, `failed`, or `cancelled` |
+| `created_at`, `started_at`, `finished_at`, `last_update_at` | |
+| `total_urls`, `completed`, `success`, `error` | progress counters |
+| `available_count`, `unavailable_count` | counted over successful scrapes only |
+| `availability_summary` | `all_available`, `some_unavailable`, `none_available`, or `unknown` |
+| `rate_urls_per_sec`, `eta_seconds` | |
+| `method_counts` | `{scrapingbee, playwright, static}` |
+| `url_ids` | IDs requested, or null for all URLs |
 
-```
-1. User Action
-   └─→ Click "Run Scan" button
+### `logs`
 
-2. Frontend
-   └─→ handleRunScan()
-       └─→ api.runScan()
-           └─→ axios.post('/api/scan/run', {})
+Application events (`event_type`, `details`, `timestamp`, `level`). A TTL index deletes entries after 30 days.
 
-3. Network
-   └─→ HTTP POST to http://localhost:8000/api/scan/run
-       Headers: { Content-Type: application/json }
-       Body: {}
+## Docker
 
-4. Backend
-   └─→ FastAPI receives request
-       └─→ scan.py: run_scan()
-           ├─→ Validate request
-           ├─→ Get URLs from DB
-           ├─→ Create background task
-           └─→ Return response immediately
+`docker-compose.yml` runs five services on one bridge network:
 
-5. Background Task
-   └─→ run_scan_task()
-       ├─→ For each URL:
-       │   ├─→ Call scraper.scrape_url()
-       │   │   ├─→ Fetch HTML
-       │   │   └─→ detector.detect_all_buttons()
-       │   ├─→ Save result to DB
-       │   └─→ Log event
-       └─→ Complete
+| Service | Image / build | Host port |
+|---------|---------------|-----------|
+| `mongodb` | `mongo:7.0`, data in the `mongodb_data` volume | 27017 |
+| `redis` | `redis:7.2-alpine` | 6379 |
+| `backend` | `backend/Dockerfile`, runs uvicorn | 8080 → 8000 |
+| `worker` | same image, runs `celery ... worker --concurrency=2` | — |
+| `frontend` | `frontend/Dockerfile` | 3000 |
 
-6. Response
-   └─→ {
-         "message": "Scan started for 10 URLs",
-         "url_count": 10,
-         "status": "running"
-       }
+Both `backend` and `worker` mount `./scraper` at `/app/scraper`, so rule edits and saved cookies are shared with the host without rebuilding. The backend image is `python:3.11-slim` with Chromium's system libraries and `playwright install chromium`. It has no display server, so the browser always runs headless in Docker.
 
-7. Frontend
-   └─→ Receive response
-       ├─→ Show notification
-       ├─→ Set scanning state
-       └─→ Start polling for results
+## Frontend
 
-8. Polling
-   └─→ Every 5 seconds:
-       └─→ api.getLatestResults()
-           └─→ GET /api/scan/results/latest
-               └─→ Update ResultsTable
-
-9. Display
-   └─→ ResultsTable.tsx
-       └─→ Show scan results with status indicators
-```
-
----
-
-## 🔐 Security Flow
-
-```
-Frontend Request
-│
-├─→ URL Validation
-│   └─→ Check format (http/https)
-│
-├─→ CORS Check
-│   └─→ Origin must be in allowed list
-│
-├─→ Input Sanitization
-│   └─→ Remove malicious characters
-│
-├─→ API Request
-│   └─→ Send to backend
-│
-Backend Processing
-│
-├─→ Pydantic Validation
-│   └─→ Verify request schema
-│
-├─→ Input Sanitization
-│   └─→ Clean dangerous inputs
-│
-├─→ Business Logic
-│   └─→ Process request
-│
-└─→ Database Operation
-    └─→ Use parameterized queries
-```
-
----
-
-## 🔄 State Management
-
-### Frontend State Flow
-
-```
-Application State
-│
-├── URLs State
-│   ├── Source: MongoDB via API
-│   ├── Update: On add/delete
-│   └── Display: URLList component
-│
-├── Results State
-│   ├── Source: MongoDB via API
-│   ├── Update: After scans
-│   └── Display: ResultsTable component
-│
-├── Stats State
-│   ├── Source: Aggregated from DB
-│   ├── Update: On data changes
-│   └── Display: StatsCard component
-│
-└── UI State
-    ├── loading: Boolean
-    ├── scanning: Boolean
-    └── notification: Object
-```
-
----
-
-## 📈 Performance Optimization
-
-```
-Frontend Optimizations
-├── React Memoization
-│   ├── useMemo for expensive calculations
-│   └── useCallback for functions
-│
-├── Code Splitting
-│   └── Dynamic imports for heavy components
-│
-└── Lazy Loading
-    └── Load data on demand
-
-Backend Optimizations
-├── Async Operations
-│   ├── AsyncIO for database
-│   ├── Concurrent scanning
-│   └── Background tasks
-│
-├── Database Indexing
-│   ├── Index on url field
-│   └── Compound index on url + scanned_at
-│
-└── Caching (Future)
-    └── Redis for frequent queries
-
-Scraper Optimizations
-├── Concurrent Requests
-│   └── asyncio.gather() for parallel scraping
-│
-├── Smart Rendering
-│   ├── Static fetch for simple sites
-│   └── Playwright only when needed
-│
-└── Timeout Management
-    └── Configurable per-site timeouts
-```
-
----
-
-## 🎯 Key Design Patterns
-
-### Backend
-- **Repository Pattern** - Database abstraction
-- **Service Layer** - Business logic separation
-- **Dependency Injection** - Via FastAPI
-- **Background Tasks** - For async operations
-
-### Frontend
-- **Component Composition** - Reusable UI pieces
-- **Custom Hooks** - Shared logic
-- **Props Drilling** - Simple state management
-- **Fetch-on-Render** - Data loading pattern
-
-### Scraper
-- **Strategy Pattern** - Multiple fetch strategies
-- **Factory Pattern** - Scraper instantiation
-- **Configuration Pattern** - JSON-based rules
-- **Fallback Pattern** - Graceful degradation
-
----
-
-**These diagrams show the complete system architecture!** 🎨
+| File | Role |
+|------|------|
+| `src/pages/index.tsx` | page layout, scan start, job polling, notifications |
+| `src/components/URLInput.tsx` | paste or type URLs, optional group name |
+| `src/components/URLList.tsx` | stored URLs, delete |
+| `src/components/ResultsTable.tsx` | latest result per URL, method badge, variants |
+| `src/components/StatsCard.tsx` | totals from `/api/logs/stats` |
+| `src/lib/api.ts` | axios client for every endpoint |

@@ -1,363 +1,170 @@
-# 🚀 Setup and Installation Guide
+# Setup and Configuration
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed:
+- **Docker Desktop** (Linux containers) for the Docker setup, or
+- **Local setup:** Python 3.11+, Node.js 18+, and Docker (or local installs) for MongoDB 7 and Redis 7
 
-- **Docker Desktop** (recommended for easiest setup)
-  - Windows: [Download Docker Desktop](https://www.docker.com/products/docker-desktop)
-  - Includes Docker and Docker Compose
-  
-- **Alternative: Local Development**
-  - Python 3.11 or higher
-  - Node.js 18 or higher
-  - MongoDB 7.0 or higher
+## Docker
 
-## Quick Start with Docker (Recommended)
-
-### 1. Clone or Navigate to Project Directory
-
-```cmd
-cd "c:\Nitin Computer Science\Product Checker"
-```
-
-### 2. Create Environment File
-
-```cmd
+```powershell
+cd product-checker
 copy .env.example .env
+docker compose up -d --build
 ```
 
-Edit `.env` if you need to customize any settings (optional for local testing).
+This starts five containers: `mongodb`, `redis`, `backend`, `worker`, and `frontend`.
 
-### 3. Start All Services
+| What | URL |
+|------|-----|
+| UI | http://localhost:3000 |
+| API | http://localhost:8080 |
+| Swagger docs | http://localhost:8080/docs |
+| Health check | http://localhost:8080/health |
 
-```cmd
-docker-compose up -d
+`start.bat` does the same thing (copies `.env` if missing, then runs Compose). Its final message still lists port 8000, but the API is on 8080.
+
+Stop everything with `docker compose down`, or `docker compose down -v` to also delete the MongoDB data volume.
+
+To run more scans in parallel, add workers:
+
+```powershell
+docker compose up -d --scale worker=3
 ```
 
-This single command will:
-- Pull necessary Docker images
-- Build the backend and frontend
-- Start MongoDB, Backend API, and Frontend
-- Set up networking between services
+Each worker runs up to 2 Celery tasks, and each task can open a Chromium browser (roughly 200 MB each).
 
-### 4. Access the Application
+### How configuration reaches the containers
 
-Wait 2-3 minutes for services to start, then:
+The backend and worker containers do **not** read `.env`. Their settings come from the `environment:` blocks in `docker-compose.yml`, and anything not set there falls back to the defaults in `backend/app/config.py`. The only value passed through from `.env` is `SCRAPINGBEE_API_KEY`. To change a setting in Docker (for example `SCRAPER_CHECK_VARIANTS`), add it to the compose file.
 
-- **Frontend UI**: http://localhost:3000
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
+## Local setup (no Docker for the app)
 
-### 5. Stop Services
+1. **Start MongoDB and Redis:**
 
-```cmd
-docker-compose down
-```
+   ```powershell
+   docker run -d --name ubique-mongo -p 27017:27017 mongo:7.0
+   docker run -d --name ubique-redis -p 6379:6379 redis:7.2-alpine
+   ```
 
-To also remove data volumes:
+2. **Create `.env`** in `product-checker/` from `.env.example`. The defaults point at `localhost` for MongoDB and Redis.
 
-```cmd
-docker-compose down -v
-```
+3. **Backend API:**
 
----
-
-## Local Development Setup
-
-If you prefer to run services individually without Docker:
-
-### Backend Setup
-
-1. **Navigate to backend directory**
-   ```cmd
+   ```powershell
    cd backend
-   ```
-
-2. **Create virtual environment**
-   ```cmd
-   python -m venv venv
-   venv\Scripts\activate
-   ```
-
-3. **Install dependencies**
-   ```cmd
+   python -m venv .venv
+   .venv\Scripts\activate
    pip install -r requirements.txt
+   python -m playwright install chromium
+   python run.py
    ```
 
-4. **Install Playwright browsers**
-   ```cmd
-   playwright install chromium
+   `run.py` sets the Windows asyncio event-loop policy that Playwright needs, then serves on `BACKEND_PORT` (8080).
+
+4. **Worker** (second terminal, same virtual environment):
+
+   ```powershell
+   cd backend
+   .venv\Scripts\activate
+   celery -A app.celery_app.celery_app worker -l INFO --concurrency=2 --pool=solo
    ```
 
-5. **Start MongoDB**
-   - Install MongoDB locally or use MongoDB Atlas
-   - Update `MONGODB_URL` in `.env`
+   Celery's default process pool does not run on Windows, so use `--pool=solo` or `--pool=threads`.
 
-6. **Run the backend**
-   ```cmd
-   uvicorn app.main:app --reload
-   ```
+5. **Frontend** (third terminal):
 
-### Frontend Setup
-
-1. **Navigate to frontend directory**
-   ```cmd
+   ```powershell
    cd frontend
-   ```
-
-2. **Install dependencies**
-   ```cmd
-   npm install
-   ```
-
-3. **Start development server**
-   ```cmd
+   npm ci
    npm run dev
    ```
 
-### Scraper Testing
+   The frontend reads the API address from `NEXT_PUBLIC_API_URL` in `frontend/.env.local` (defaults to `http://localhost:8080`).
 
-To test the scraper independently:
+`start-dev.bat` starts MongoDB, the API (inside a conda environment named `product-checker`), and the frontend. It does **not** start Redis or the worker, so scans stay queued until you start those yourself.
 
-```cmd
+### Testing the scraper on its own
+
+```powershell
 cd scraper
 python scraper.py
 ```
 
----
+This runs a quick smoke test against `example.com`. To test a real product page, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#testing-a-single-url).
 
-## Configuration
+## Environment variables
 
-### Environment Variables
+Read by `backend/app/config.py` (names are case-insensitive).
 
-Key variables in `.env`:
+### Core
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MONGODB_URL` | `mongodb://mongodb:27017` | MongoDB connection string |
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `MONGODB_URL` | `mongodb://localhost:27017` | MongoDB connection string |
 | `MONGODB_DATABASE` | `ubique_product_checker` | Database name |
-| `BACKEND_PORT` | `8000` | Backend API port |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | API URL for frontend |
-| `SCRAPER_TIMEOUT` | `30` | Scraper timeout in seconds |
-| `SCRAPER_USE_PLAYWRIGHT` | `true` | Use Playwright for dynamic sites |
-| `SCRAPER_MAX_CONCURRENT` | `5` | Max concurrent scraper tasks |
-| `LOG_LEVEL` | `INFO` | Logging level |
+| `MONGODB_MAX_POOL_SIZE` | `20` | Connection pool size |
+| `REDIS_URL` | `redis://localhost:6379/0` | Celery broker and result store |
+| `BACKEND_HOST` / `BACKEND_PORT` | `0.0.0.0` / `8080` | Where `run.py` serves the API |
+| `BACKEND_RELOAD` | `false` | Auto-reload on code changes |
+| `CORS_ORIGINS` | `["http://localhost:3000","http://localhost:3001"]` | Allowed frontend origins. Accepts a JSON list or a comma-separated string |
+| `SECRET_KEY` | placeholder | Not used yet. The app logs a warning if it's still the placeholder |
+| `LOG_LEVEL` / `LOG_FILE` | `INFO` / `logs/app.log` | Logging. Relative paths resolve from `product-checker/` |
 
-### Detection Rules
+### Scraper
 
-Customize button detection in `scraper/detection_rules.json`:
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SCRAPER_USE_PLAYWRIGHT` | `true` | Use a real browser. Turning it off also turns off variant checks |
+| `SCRAPER_HEADLESS` | `true` | Run the browser without a window. Some sites block headless browsers more |
+| `SCRAPER_CHECK_VARIANTS` | `true` | Click through size/color options and check each |
+| `SCRAPER_TIMEOUT` | `30` | Page navigation timeout in seconds (5× for Amazon and Walmart) |
+| `SCRAPER_SCRAPINGBEE_FIRST` | `false` | Try ScrapingBee before Playwright |
+| `SCRAPER_PER_URL_TASK_TIMEOUT_SECONDS` | `0` | Total time allowed per URL. `0` means automatic (`max(timeout + 60, timeout × 12 + 180)`) |
+| `PLAYWRIGHT_MAX_CONCURRENT` | `2` | Browsers open at once per worker process |
 
-```json
-{
-  "add_to_cart": {
-    "css_selectors": ["#add-to-cart", ".add-to-cart"],
-    "text_patterns": ["add to cart", "add to bag"],
-    "domains": {
-      "amazon.com": {
-        "selectors": ["#add-to-cart-button"],
-        "text": ["Add to Cart"]
-      }
-    }
-  }
-}
-```
+`SCRAPER_MAX_CONCURRENT` and `SCRAPER_USER_AGENT` appear in `.env.example` but nothing reads them. The user agent is hard-coded in `scraper/scraper.py`.
 
----
+These three are read directly from the process environment, **not** from `.env`. Set them in your shell or in `docker-compose.yml`:
 
-## Verification
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SCRAPER_STORAGE_STATE_DIR` | `scraper/storage_state` | Where saved cookies are read from |
+| `SCRAPER_SCREENSHOT_DIR` | empty | If set, saves a screenshot when navigation fails or a block page is detected |
+| `SCRAPER_RETRY_FRESH_CONTEXT` | `true` | After a block, retry once without saved cookies |
 
-### Check Service Health
+### ScrapingBee (optional)
 
-1. **Backend Health**
-   ```cmd
-   curl http://localhost:8000/health
-   ```
-   Should return: `{"status":"healthy","database":"connected"}`
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SCRAPINGBEE_API_KEY` | empty | Enables ScrapingBee. Leave empty to skip it |
+| `SCRAPINGBEE_COUNTRY_CODE` | `us` | Proxy country |
+| `SCRAPINGBEE_MAX_WORKERS` | `5` | Thread pool size for the ScrapingBee client |
+| `SCRAPINGBEE_MAX_CONCURRENT` | `5` | ScrapingBee requests at once |
+| `SCRAPINGBEE_RPS` | `0` | Requests-per-second cap. `0` disables it |
 
-2. **Frontend**
-   Open http://localhost:3000 in your browser
+### Celery
 
-3. **MongoDB**
-   ```cmd
-   docker exec -it ubique-mongodb mongosh
-   ```
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CELERY_CONCURRENCY` | `2` | Informational. The actual value is the `--concurrency` flag on the worker command |
+| `CELERY_SCRAPE_TASK_SOFT_TIME_LIMIT` | `1080` | Seconds before Celery interrupts a scrape task |
+| `CELERY_SCRAPE_TASK_TIME_LIMIT` | `1200` | Seconds before Celery kills a scrape task |
 
-### View Logs
+## Before deploying anywhere public
 
-```cmd
-# All services
-docker-compose logs
+- `docker-compose.yml` publishes MongoDB (27017) and Redis (6379) on all interfaces with no authentication. Remove those `ports:` entries or add credentials.
+- There is no login on the API and no rate limit on `POST /api/scan/run`.
+- Set `CORS_ORIGINS` to your real frontend origin.
+- Build the frontend with the correct `NEXT_PUBLIC_API_URL`. It's baked in at build time.
+- Expect more bot blocking from a cloud server than from a home connection. See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#scans-blocked-in-docker-but-not-locally).
 
-# Specific service
-docker-compose logs backend
-docker-compose logs frontend
-docker-compose logs mongodb
+## Backup and restore
 
-# Follow logs in real-time
-docker-compose logs -f backend
-```
-
----
-
-## Common Issues
-
-### Port Already in Use
-
-If ports 3000, 8000, or 27017 are already in use:
-
-1. Stop the conflicting service
-2. Or change ports in `docker-compose.yml`:
-   ```yaml
-   ports:
-     - "8001:8000"  # Use port 8001 instead of 8000
-   ```
-
-### Playwright Installation Fails
-
-```cmd
-# In backend container or local environment
-playwright install-deps
-playwright install chromium
-```
-
-### MongoDB Connection Failed
-
-- Ensure MongoDB container is running: `docker ps`
-- Check connection string in `.env`
-- Restart backend: `docker-compose restart backend`
-
-### Frontend Can't Connect to Backend
-
-- Check `NEXT_PUBLIC_API_URL` in `.env`
-- Verify backend is running: http://localhost:8000/health
-- Check browser console for CORS errors
-
----
-
-## Updating the Application
-
-### Pull Latest Changes
-
-```cmd
-git pull origin main
-```
-
-### Rebuild Docker Containers
-
-```cmd
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
-```
-
-### Update Python Dependencies
-
-```cmd
-cd backend
-pip install -r requirements.txt --upgrade
-```
-
-### Update Node Dependencies
-
-```cmd
-cd frontend
-npm install
-```
-
----
-
-## Production Deployment
-
-### Security Checklist
-
-- [ ] Change `SECRET_KEY` in `.env`
-- [ ] Use strong MongoDB credentials
-- [ ] Enable MongoDB authentication
-- [ ] Set up HTTPS/SSL certificates
-- [ ] Configure firewall rules
-- [ ] Disable debug mode (`BACKEND_RELOAD=false`)
-- [ ] Set appropriate CORS origins
-- [ ] Regular backups of MongoDB data
-
-### Docker Production Build
-
-```cmd
-docker-compose -f docker-compose.prod.yml up -d
-```
-
-### Environment Variables for Production
-
-```bash
-MONGODB_URL=mongodb://username:password@mongodb:27017
-SECRET_KEY=your-very-secure-secret-key-here
-BACKEND_RELOAD=false
-LOG_LEVEL=WARNING
-CORS_ORIGINS=https://yourdomain.com
-```
-
----
-
-## Backup and Restore
-
-### Backup MongoDB Data
-
-```cmd
+```powershell
 docker exec ubique-mongodb mongodump --out /backup
 docker cp ubique-mongodb:/backup ./backup
-```
 
-### Restore MongoDB Data
-
-```cmd
 docker cp ./backup ubique-mongodb:/backup
 docker exec ubique-mongodb mongorestore /backup
 ```
-
----
-
-## Performance Tuning
-
-### Increase Concurrent Scraping
-
-Edit `.env`:
-```
-SCRAPER_MAX_CONCURRENT=10
-```
-
-### Disable Playwright for Static Sites
-
-```
-SCRAPER_USE_PLAYWRIGHT=false
-```
-
-### Increase Timeout for Slow Sites
-
-```
-SCRAPER_TIMEOUT=60
-```
-
----
-
-## Support
-
-For issues and questions:
-
-1. Check logs: `docker-compose logs`
-2. Review this documentation
-3. Check GitHub issues
-4. Contact development team
-
----
-
-## Next Steps
-
-After successful installation:
-
-1. ✅ Add test URLs through the UI
-2. ✅ Run your first scan
-3. ✅ Review results table
-4. ✅ Customize detection rules if needed
-5. ✅ Set up scheduled scans (future feature)
-
-Happy scanning! 🎉

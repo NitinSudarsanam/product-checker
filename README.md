@@ -1,259 +1,122 @@
-# 🧩 Ubique Buy-Button Detection System
+# Ubique Product Checker
 
-## Overview
+Tracks product availability by checking whether a product page shows a usable **Add to Cart** or **Buy Now** button. You add product URLs in a web UI, run a scan, and each URL is marked `available`, `unavailable`, or `error` (the page could not be read, usually because the retailer blocked the scraper).
 
-The Ubique Buy-Button Detection System is an automated web scraping application that detects the presence of "Add to Cart" and "Buy Now" buttons on e-commerce websites. This system helps track product availability across multiple URLs efficiently.
+## Services
 
-## Features
+| Service | Code | Port (host) |
+|---------|------|-------------|
+| Frontend (Next.js) | `frontend/` | 3000 |
+| Backend API (FastAPI) | `backend/app/` | 8080 (container port 8000) |
+| Worker (Celery) | `backend/app/tasks/scan_tasks.py` | — |
+| MongoDB | stores URLs, scan results, scan jobs, logs | 27017 |
+| Redis | Celery message queue | 6379 |
 
-### POC Features (Current)
-- ✅ Single and bulk URL input
-- ✅ Web scraping with static and dynamic rendering
-- ✅ Configurable button detection rules
-- ✅ Real-time scan results display
-- ✅ Database persistence (MongoDB)
-- ✅ Comprehensive logging
-- ✅ Manual scan triggering
-- ✅ Docker containerization
+The API never scrapes pages itself. `POST /api/scan/run` creates a scan job and hands it to the worker through Redis, and the frontend polls the job for progress. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-### Future Enhancements
-- ⏳ Scheduled automatic scans
-- ⏳ Email/Slack notifications
-- ⏳ Domain-specific detection patterns
-- ⏳ Screenshot capture
-- ⏳ AI-based fallback detection
-- ⏳ Advanced concurrency/scaling
+## Quick start (Docker)
 
-## Architecture
+From `product-checker/`:
 
-```
-┌─────────────────┐
-│  React Frontend │ (Next.js + Tailwind CSS)
-└────────┬────────┘
-         │ HTTP/REST
-┌────────▼────────┐
-│  FastAPI Backend│ (Python)
-└────────┬────────┘
-         │
-    ┌────┴─────┬─────────────┐
-    │          │             │
-┌───▼───┐ ┌───▼───────┐ ┌──▼──────┐
-│MongoDB│ │  Scraper  │ │ Logger  │
-│  DB   │ │  Engine   │ │ System  │
-└───────┘ └───────────┘ └─────────┘
-          (BeautifulSoup + Playwright)
+```powershell
+copy .env.example .env
+docker compose up -d --build
 ```
 
-## Project Structure
+- UI: http://localhost:3000
+- API: http://localhost:8080
+- API docs (Swagger): http://localhost:8080/docs
 
-```
-Product Checker/
-├── backend/                 # FastAPI backend
-│   ├── app/
-│   │   ├── main.py         # FastAPI app entry
-│   │   ├── api/            # API endpoints
-│   │   ├── models/         # Database models
-│   │   ├── services/       # Business logic
-│   │   └── utils/          # Helper functions
-│   ├── requirements.txt    # Python dependencies
-│   └── Dockerfile
-│
-├── scraper/                # Scraper engine
-│   ├── scraper.py         # Main scraper logic
-│   ├── detector.py        # Button detection
-│   ├── detection_rules.json # Selector configuration
-│   └── requirements.txt
-│
-├── frontend/              # React/Next.js UI
-│   ├── src/
-│   │   ├── components/   # React components
-│   │   ├── pages/        # Next.js pages
-│   │   └── styles/       # CSS/Tailwind
-│   ├── package.json
-│   └── Dockerfile
-│
-├── docker-compose.yml    # Docker orchestration
-├── .env.example         # Environment variables template
-└── README.md           # This file
+If you see `dockerDesktopLinuxEngine` pipe errors on Windows, start Docker Desktop and make sure it is using Linux containers.
+
+`docker-compose.yml` does not load `.env` into the backend and worker containers. They use the values set in the compose file plus the defaults in `backend/app/config.py`. `SCRAPINGBEE_API_KEY` is the exception: Compose reads it from `.env` and passes it through.
+
+## Running a scan
+
+1. Add URLs in the UI.
+2. Click **Run Scan**.
+3. Watch the progress bar. The worker scrapes each URL and results appear when the job finishes.
+
+Logs:
+
+```powershell
+docker compose logs -f backend
+docker compose logs -f worker
 ```
 
-## Technology Stack
+## Local development (no Docker)
 
-### Backend
-- **FastAPI** - Modern Python web framework
-- **Motor** - Async MongoDB driver
-- **Pydantic** - Data validation
+Full instructions are in [SETUP.md](SETUP.md). In short, you need MongoDB and Redis running (Docker is easiest), then three terminals:
 
-### Scraper
-- **BeautifulSoup4** - Static HTML parsing
-- **Playwright** - Dynamic JavaScript rendering
-- **aiohttp** - Async HTTP requests
-
-### Frontend
-- **Next.js 14** - React framework
-- **Tailwind CSS** - Utility-first styling
-- **Axios** - HTTP client
-
-### Database
-- **MongoDB** - Document database for flexible schema
-
-### DevOps
-- **Docker** - Containerization
-- **Docker Compose** - Multi-container orchestration
-
-## Quick Start
-
-### Prerequisites
-- Docker and Docker Compose
-- Node.js 18+ (for local frontend development)
-- Python 3.11+ (for local backend development)
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   cd "c:\Nitin Computer Science\Product Checker"
-   ```
-
-2. **Set up environment variables**
-   ```bash
-   copy .env.example .env
-   ```
-   Edit `.env` with your configuration
-
-3. **Start with Docker Compose**
-   ```bash
-   docker-compose up -d
-   ```
-
-4. **Access the application**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:8000
-   - API Docs: http://localhost:8000/docs
-
-### Local Development Setup
-
-#### Backend
-```bash
+```powershell
+# 1. API
 cd backend
-python -m venv venv
-venv\Scripts\activate
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
+python -m playwright install chromium
+python run.py                 # serves on BACKEND_PORT (8080)
 
-#### Frontend
-```bash
+# 2. Worker (same venv)
+cd backend
+celery -A app.celery_app.celery_app worker -l INFO --concurrency=2 --pool=solo
+
+# 3. Frontend
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-## API Endpoints
+On Windows, Celery's default process pool doesn't work, so use `--pool=solo` (or `--pool=threads`).
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/urls/add` | Add single or multiple URLs |
-| GET | `/api/urls` | Retrieve all stored URLs |
-| DELETE | `/api/urls/{id}` | Delete a URL |
-| POST | `/api/scan/run` | Trigger manual scan |
-| GET | `/api/scan/results` | Get scan results |
-| GET | `/api/logs` | Retrieve system logs |
+## How a page is checked
 
-## Configuration
+1. **Fetch.** `scraper/scraper.py` tries Playwright (a real Chromium browser) first, then ScrapingBee if `SCRAPINGBEE_API_KEY` is set, then a plain HTTP request. Set `SCRAPER_SCRAPINGBEE_FIRST=true` to try ScrapingBee first.
+2. **Block check.** If the page is a CAPTCHA, "access denied", or similar challenge page, the result is `error`, not `unavailable`.
+3. **Detect.** `scraper/detector.py` looks for buy buttons using `scraper/detection_rules.json` and checks for "out of stock" wording.
+4. **Variants.** When Playwright fetched the page, it also selects each size or color option and checks whether the buy button becomes usable. The product counts as available if any variant is purchasable.
 
-### Detection Rules (`detection_rules.json`)
+Details: [docs/DETECTION_EXPLAINED.md](docs/DETECTION_EXPLAINED.md).
 
-The scraper uses a configurable JSON file to define button detection patterns:
+## Getting past bot blocking
 
-```json
-{
-  "add_to_cart": [
-    "#add-to-cart",
-    "button[id*='add']",
-    ".add-to-cart",
-    "button:contains('Add to Cart')"
-  ],
-  "buy_now": [
-    "#buy-now",
-    "button:contains('Buy Now')",
-    ".buy-now"
-  ]
-}
+Big retailers often serve CAPTCHA or "robot or human" pages to automated browsers. You can pass the check once by hand and reuse the cookies:
+
+```powershell
+$env:BOOTSTRAP_URL="https://www.target.com/p/-/A-88920975"
+python scraper\bootstrap_state.py
 ```
 
-You can customize these selectors for specific e-commerce platforms.
+A browser window opens. Solve any challenge, and once the product page loads, the script saves cookies to `scraper/storage_state/<domain>.json`. Later scans load that file automatically. These files contain session cookies and are git-ignored.
 
-## Usage
+Scans that run in Docker get blocked more often than local runs, because the container's browser is headless Linux Chromium claiming to be Windows Chrome. See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#scans-blocked-in-docker-but-not-locally).
 
-1. **Add URLs**: Enter single or multiple URLs in the input field
-2. **Run Scan**: Click "Run Scan" to start detection
-3. **View Results**: Check the results table for button availability
-4. **Review Logs**: Access logs for debugging and auditing
+## Documentation
 
-## Database Schema
+- [SETUP.md](SETUP.md): installation and configuration reference
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, data flow, database collections
+- [docs/API_REFERENCE.md](docs/API_REFERENCE.md): HTTP endpoints
+- [docs/DETECTION_EXPLAINED.md](docs/DETECTION_EXPLAINED.md): how availability is decided
+- [SCRAPINGBEE.md](SCRAPINGBEE.md): optional ScrapingBee integration
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): working on the code, adding site rules
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md): common problems
+- [FAILURE_MODES.md](FAILURE_MODES.md): known risks and weak spots
 
-### URLs Collection
-```javascript
-{
-  _id: ObjectId,
-  url: String,
-  created_at: DateTime,
-  group_name: String (optional)
-}
+## Repository layout
+
 ```
-
-### Scan Results Collection
-```javascript
-{
-  _id: ObjectId,
-  url: String,
-  scanned_at: DateTime,
-  add_to_cart: Boolean,
-  buy_now: Boolean,
-  status: String, // "available" | "unavailable" | "error"
-  error_message: String (optional)
-}
+backend/app/
+  api/            FastAPI routes: urls.py, scan.py, logs.py
+  tasks/          Celery tasks: enqueue_scan fan-out, scrape_one_url
+  celery_app.py   Celery configuration
+  config.py       Settings (env vars and defaults)
+  database.py     MongoDB connection and indexes
+frontend/src/     Next.js pages, components, API client
+scraper/
+  scraper.py            fetch chain, block detection, variant probing
+  detector.py           HTML button detection
+  detection_rules.json  site-specific and generic selectors
+  bootstrap_state.py    save cookies after solving a challenge by hand
+  benchmark_methods.py  compare fetch methods on golden_urls.py
+scripts/debug/    one-off analysis scripts from detection tuning (some are outdated)
 ```
-
-### Logs Collection
-```javascript
-{
-  _id: ObjectId,
-  event_type: String,
-  details: Object,
-  timestamp: DateTime
-}
-```
-
-## Troubleshooting
-
-### Scraper Issues
-- **Timeout errors**: Increase timeout in scraper config
-- **JS rendering fails**: Ensure Playwright browsers are installed
-- **Button not detected**: Update detection rules in `detection_rules.json`
-
-### Database Connection
-- Verify MongoDB is running
-- Check connection string in `.env`
-- Ensure network access between containers
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Open a Pull Request
-
-## License
-
-MIT License - see LICENSE file for details
-
-## Support
-
-For issues and questions, please open a GitHub issue or contact the development team.
-
----
-
-**Built for Ubique** - Making e-commerce monitoring effortless

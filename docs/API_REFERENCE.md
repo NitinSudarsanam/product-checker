@@ -1,464 +1,258 @@
-# API Reference - Ubique Product Checker
+# API Reference
 
-## Base URL
+Base URL: `http://localhost:8080` (Docker and local default). Interactive docs: http://localhost:8080/docs.
 
-```
-http://localhost:8000
-```
+There is no authentication and no rate limiting.
 
-## Authentication
-
-Currently, no authentication is required (POC version).
+Errors use FastAPI's standard shape, `{"detail": "..."}`. Request body validation failures return `422`.
 
 ---
 
-## Endpoints
+## Health
 
-### Health Check
+### `GET /health`
 
-#### `GET /health`
-
-Check API health status.
-
-**Response:**
 ```json
-{
-  "status": "healthy",
-  "database": "connected"
-}
+{ "status": "healthy", "database": "connected" }
 ```
+
+`status` is `"degraded"` and `database` is `"disconnected"` if MongoDB doesn't respond.
+
+### `GET /`
+
+Returns the API name, version, and a link to `/docs`.
 
 ---
 
-## URL Management
+## URLs
 
-### Add URLs
+### `POST /api/urls/add` → 201
 
-#### `POST /api/urls/add`
-
-Add single or multiple URLs to the system.
-
-**Request Body:**
 ```json
 {
-  "urls": [
-    "https://www.amazon.com/product1",
-    "https://www.walmart.com/product2"
-  ],
+  "urls": ["https://www.walmart.com/ip/21130579", "https://www.target.com/p/-/A-88920975"],
   "group_name": "Electronics"
 }
 ```
 
-**Response:**
+- 1 to 500 URLs per request. Surrounding whitespace is trimmed.
+- Each URL must start with `http://` or `https://`.
+- URLs pointing at private, loopback, link-local, or reserved addresses (`localhost`, `10.x`, `192.168.x`, `*.internal` and similar) are rejected with 422, to prevent the scraper being aimed at internal services.
+- URLs that already exist are skipped.
+
 ```json
-{
-  "message": "Successfully added 2 URLs",
-  "added_count": 2,
-  "duplicate_count": 0
-}
+{ "message": "Successfully added 2 URLs", "added_count": 2, "duplicate_count": 0 }
 ```
 
----
+### `GET /api/urls`
 
-### Get All URLs
+Query: `group_name`, `limit` (default 100), `skip` (default 0).
 
-#### `GET /api/urls`
-
-Retrieve all stored URLs with optional filtering.
-
-**Query Parameters:**
-- `group_name` (optional): Filter by group
-- `limit` (optional, default: 100): Max results
-- `skip` (optional, default: 0): Pagination offset
-
-**Example:**
-```
-GET /api/urls?group_name=Electronics&limit=50
-```
-
-**Response:**
 ```json
 [
   {
     "id": "507f1f77bcf86cd799439011",
-    "url": "https://www.amazon.com/product",
-    "created_at": "2024-12-12T10:30:00Z",
+    "url": "https://www.walmart.com/ip/21130579",
+    "created_at": "2026-05-05T18:06:51Z",
     "group_name": "Electronics"
   }
 ]
 ```
 
----
+### `GET /api/urls/{url_id}`
 
-### Get Single URL
+One URL in the same shape. 400 for a malformed ID, 404 if not found.
 
-#### `GET /api/urls/{url_id}`
+### `DELETE /api/urls/{url_id}`
 
-Get a specific URL by ID.
+Deletes the URL and all of its scan results.
 
-**Response:**
 ```json
-{
-  "id": "507f1f77bcf86cd799439011",
-  "url": "https://www.amazon.com/product",
-  "created_at": "2024-12-12T10:30:00Z",
-  "group_name": "Electronics"
-}
+{ "message": "URL deleted successfully" }
 ```
 
----
+### `DELETE /api/urls`
 
-### Delete URL
+Deletes every URL and every scan result.
 
-#### `DELETE /api/urls/{url_id}`
-
-Delete a specific URL and its scan results.
-
-**Response:**
 ```json
-{
-  "message": "URL deleted successfully"
-}
+{ "message": "All URLs and scan results deleted successfully", "urls_deleted": 10, "scans_deleted": 25 }
 ```
 
 ---
 
-### Delete All URLs
+## Scans
 
-#### `DELETE /api/urls`
+### `POST /api/scan/run`
 
-Delete all URLs and scan results.
+Starts a scan job. The body is optional: send `{}` (or `{"url_ids": null}`) to scan every URL, or list specific IDs.
 
-**Response:**
+```json
+{ "url_ids": ["507f1f77bcf86cd799439011"] }
+```
+
+Returns immediately. The worker does the scraping.
+
 ```json
 {
-  "message": "All URLs and scan results deleted successfully",
-  "urls_deleted": 10,
-  "scans_deleted": 25
+  "message": "Scan queued for 1 URLs",
+  "job_id": "3f7c9a2e-5b1d-4c8e-9f0a-2d6b7e1c4a53",
+  "url_count": 1,
+  "status": "queued"
 }
 ```
 
----
+400 if an ID is malformed or no URLs match. Nothing stops you from starting a second scan while one is running.
 
-## Scanning
+### `GET /api/scan/{job_id}/status`
 
-### Run Scan
+Progress for one job. Poll this until `status` is `done`, `failed`, or `cancelled`.
 
-#### `POST /api/scan/run`
-
-Trigger a manual scan for all URLs or specific URL IDs.
-
-**Request Body:**
 ```json
 {
-  "url_ids": ["507f1f77bcf86cd799439011", "507f1f77bcf86cd799439012"]
+  "job_id": "3f7c9a2e-5b1d-4c8e-9f0a-2d6b7e1c4a53",
+  "status": "running",
+  "created_at": "2026-05-05T19:33:28Z",
+  "started_at": "2026-05-05T19:33:29Z",
+  "finished_at": null,
+  "total_urls": 10,
+  "completed": 4,
+  "success": 3,
+  "error": 1,
+  "available_count": 2,
+  "unavailable_count": 1,
+  "availability_summary": "some_unavailable",
+  "rate_urls_per_sec": 0.052,
+  "eta_seconds": 115,
+  "last_update_at": "2026-05-05T19:34:45Z"
 }
 ```
 
-Or leave empty to scan all:
+| `status` | Meaning |
+|----------|---------|
+| `queued` | Waiting for a worker |
+| `running` | URLs are being scraped |
+| `done` | Every URL has a result (some may be errors) |
+| `failed` | No URLs were found when the worker started |
+| `cancelled` | Workers skip remaining URLs. No endpoint sets this yet; change it directly in MongoDB |
+
+`availability_summary` only counts successful scrapes: `all_available`, `some_unavailable`, `none_available`, or `unknown` (nothing succeeded yet).
+
+### `GET /api/scan/status`
+
 ```json
-{}
+{ "scanning": true }
 ```
 
-**Response:**
-```json
-{
-  "message": "Scan started for 10 URLs",
-  "url_count": 10,
-  "status": "running"
-}
-```
+True if any job is `queued` or `running`.
 
----
+### `GET /api/scan/results`
 
-### Get Scan Results
+Every stored result, newest first. Query: `url`, `status_filter` (`available` / `unavailable` / `error`), `limit` (default 200), `skip`.
 
-#### `GET /api/scan/results`
-
-Retrieve scan results with optional filtering.
-
-**Query Parameters:**
-- `url` (optional): Filter by specific URL
-- `status_filter` (optional): Filter by status (available/unavailable/error)
-- `limit` (optional, default: 100): Max results
-- `skip` (optional, default: 0): Pagination offset
-
-**Example:**
-```
-GET /api/scan/results?status_filter=available&limit=20
-```
-
-**Response:**
 ```json
 [
   {
-    "id": "507f1f77bcf86cd799439013",
-    "url": "https://www.amazon.com/product",
-    "scanned_at": "2024-12-12T10:35:00Z",
-    "add_to_cart": true,
-    "buy_now": true,
+    "id": "663fd3a1c2b4e5f6a7b8c9d0",
+    "url": "https://www.walmart.com/ip/21130579",
+    "url_id": "507f1f77bcf86cd799439011",
+    "job_id": "3f7c9a2e-5b1d-4c8e-9f0a-2d6b7e1c4a53",
+    "scanned_at": "2026-05-05T19:34:15Z",
     "status": "available",
-    "error_message": null,
-    "response_time": 2.5
-  }
-]
-```
-
----
-
-### Get Latest Results
-
-#### `GET /api/scan/results/latest`
-
-Get the most recent scan result for each URL.
-
-**Query Parameters:**
-- `limit` (optional, default: 50): Max results
-
-**Response:**
-```json
-[
-  {
-    "id": "507f1f77bcf86cd799439013",
-    "url": "https://www.amazon.com/product",
-    "scanned_at": "2024-12-12T10:35:00Z",
     "add_to_cart": true,
     "buy_now": false,
-    "status": "available",
-    "response_time": 2.5
+    "error_message": null,
+    "blocked_reason": null,
+    "response_time": 18.42,
+    "scrape_method": "playwright",
+    "html_primary_source": "playwright",
+    "variants": { "Small": "available", "Large": "unavailable" },
+    "variants_checked": true,
+    "unavailability_override": false
   }
 ]
 ```
 
----
+- `status: "error"` covers fetch failures, timeouts, and block pages. Block pages have `error_message` like `"blocked:captcha"` or `"blocked:robot or human"`.
+- `scrape_method` is the fetch method behind the final result (`playwright`, `scrapingbee`, `static`, or `error`). `html_primary_source` is the method that returned HTML first. They differ when a result was re-checked, e.g. Wayfair results from ScrapingBee are confirmed with Playwright.
+- `blocked_reason` is part of the schema but the worker doesn't store it yet. Use `error_message`.
 
-### Clear Scan Results
+### `GET /api/scan/results/latest`
 
-#### `DELETE /api/scan/results`
+The most recent result for each URL, same shape. Query: `limit` (default 500).
 
-Clear all scan results (keeps URLs).
+### `DELETE /api/scan/results`
 
-**Response:**
+Deletes all scan results but keeps the URLs.
+
 ```json
-{
-  "message": "All scan results cleared",
-  "deleted_count": 25
-}
+{ "message": "All scan results cleared", "deleted_count": 25 }
 ```
 
 ---
 
-## Logs and Statistics
+## Logs and statistics
 
-### Get Logs
+### `GET /api/logs`
 
-#### `GET /api/logs`
+Application events. Query: `event_type`, `level` (`INFO` / `WARNING` / `ERROR`), `hours` (default 24), `limit` (default 100), `skip`.
 
-Retrieve system logs with filtering.
-
-**Query Parameters:**
-- `event_type` (optional): Filter by event type
-- `level` (optional): Filter by log level (INFO/WARNING/ERROR)
-- `hours` (optional, default: 24): Time window in hours
-- `limit` (optional, default: 100): Max results
-- `skip` (optional, default: 0): Pagination offset
-
-**Example:**
-```
-GET /api/logs?level=ERROR&hours=48
-```
-
-**Response:**
 ```json
 [
   {
-    "id": "507f1f77bcf86cd799439014",
-    "event_type": "scan_error",
-    "details": {
-      "url": "https://example.com",
-      "error": "Timeout"
-    },
-    "timestamp": "2024-12-12T10:30:00Z",
-    "level": "ERROR"
+    "id": "663fd3a1c2b4e5f6a7b8c9d1",
+    "event_type": "urls_added",
+    "details": { "count": 2, "group": "Electronics" },
+    "timestamp": "2026-05-05T18:00:00Z",
+    "level": "INFO"
   }
 ]
 ```
 
----
+Logs older than 30 days are deleted automatically by a TTL index.
 
-### Clear Logs
+### `DELETE /api/logs`
 
-#### `DELETE /api/logs`
+Query: `older_than_days` (default 30).
 
-Clear old logs.
-
-**Query Parameters:**
-- `older_than_days` (optional, default: 30): Delete logs older than X days
-
-**Response:**
 ```json
-{
-  "message": "Cleared logs older than 30 days",
-  "deleted_count": 150
-}
+{ "message": "Cleared logs older than 30 days", "deleted_count": 150 }
 ```
 
----
+### `GET /api/logs/stats`
 
-### Get Statistics
-
-#### `GET /api/logs/stats`
-
-Get system-wide statistics.
-
-**Response:**
 ```json
 {
   "total_urls": 50,
   "total_scans": 200,
-  "available_count": 150,
-  "unavailable_count": 30,
-  "error_count": 20
+  "available_count": 38,
+  "unavailable_count": 7,
+  "error_count": 5
 }
 ```
 
----
-
-## Error Responses
-
-All endpoints may return these error responses:
-
-### 400 Bad Request
-```json
-{
-  "detail": "Invalid URL ID format"
-}
-```
-
-### 404 Not Found
-```json
-{
-  "detail": "URL not found"
-}
-```
-
-### 500 Internal Server Error
-```json
-{
-  "detail": "Failed to fetch URLs: connection error"
-}
-```
+`total_scans` counts every stored result. The three status counts use only the latest result per URL.
 
 ---
 
-## Rate Limiting
-
-**Current:** No rate limiting (POC version)
-
-**Future:** 
-- 100 requests per minute per IP
-- 1000 scans per day
-
----
-
-## Webhooks (Future Feature)
-
-Subscribe to events:
-- `scan.completed` - When a scan finishes
-- `url.added` - When URLs are added
-- `button.detected` - When availability changes
-
----
-
-## Code Examples
-
-### Python
+## Example (Python)
 
 ```python
+import time
 import requests
 
-API_URL = "http://localhost:8000"
+API = "http://localhost:8080"
 
-# Add URLs
-response = requests.post(
-    f"{API_URL}/api/urls/add",
-    json={
-        "urls": ["https://www.amazon.com/product"],
-        "group_name": "Test"
-    }
-)
-print(response.json())
+requests.post(f"{API}/api/urls/add", json={"urls": ["https://www.wayfair.com/..."]})
 
-# Run scan
-response = requests.post(f"{API_URL}/api/scan/run", json={})
-print(response.json())
+job = requests.post(f"{API}/api/scan/run", json={}).json()
+while True:
+    s = requests.get(f"{API}/api/scan/{job['job_id']}/status").json()
+    print(f"{s['completed']}/{s['total_urls']}")
+    if s["status"] in ("done", "failed", "cancelled"):
+        break
+    time.sleep(5)
 
-# Get results
-response = requests.get(f"{API_URL}/api/scan/results/latest")
-results = response.json()
-for result in results:
-    print(f"{result['url']}: {result['status']}")
+for r in requests.get(f"{API}/api/scan/results/latest").json():
+    print(r["status"], r["url"], r.get("error_message") or "")
 ```
-
-### JavaScript
-
-```javascript
-const API_URL = 'http://localhost:8000';
-
-// Add URLs
-async function addURLs() {
-  const response = await fetch(`${API_URL}/api/urls/add`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      urls: ['https://www.amazon.com/product'],
-      group_name: 'Test'
-    })
-  });
-  const data = await response.json();
-  console.log(data);
-}
-
-// Run scan
-async function runScan() {
-  const response = await fetch(`${API_URL}/api/scan/run`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({})
-  });
-  const data = await response.json();
-  console.log(data);
-}
-
-// Get results
-async function getResults() {
-  const response = await fetch(`${API_URL}/api/scan/results/latest`);
-  const results = await response.json();
-  results.forEach(result => {
-    console.log(`${result.url}: ${result.status}`);
-  });
-}
-```
-
-### cURL
-
-```bash
-# Add URLs
-curl -X POST http://localhost:8000/api/urls/add \
-  -H "Content-Type: application/json" \
-  -d '{"urls":["https://www.amazon.com/product"],"group_name":"Test"}'
-
-# Run scan
-curl -X POST http://localhost:8000/api/scan/run \
-  -H "Content-Type: application/json" \
-  -d '{}'
-
-# Get results
-curl http://localhost:8000/api/scan/results/latest
-```
-
----
-
-## Interactive API Documentation
-
-Visit http://localhost:8000/docs for interactive Swagger UI documentation where you can test all endpoints directly.

@@ -1,679 +1,154 @@
-# 🔧 Troubleshooting Guide
+# Troubleshooting
 
-## Common Issues and Solutions
+Start with the logs. Most problems show up in one of these:
 
----
-
-## Installation Issues
-
-### Docker Not Found
-
-**Error:** `'docker' is not recognized as an internal or external command`
-
-**Solutions:**
-1. Install Docker Desktop: https://www.docker.com/products/docker-desktop
-2. Restart your computer after installation
-3. Verify: `docker --version`
+```powershell
+docker compose ps                       # are all 5 services up?
+docker compose logs -f worker           # scraping
+docker compose logs -f backend          # API
+curl http://localhost:8080/health       # {"status":"healthy","database":"connected"}
+```
 
 ---
 
-### Port Already in Use
+## Startup
 
-**Error:** `Port 3000/8000/27017 is already allocated`
+### `dockerDesktopLinuxEngine` pipe error, or `docker` not found
 
-**Solutions:**
+Docker Desktop isn't running, or it's set to Windows containers. Start Docker Desktop and switch to Linux containers.
 
-**Option 1: Stop conflicting services**
-```cmd
-# Find what's using the port
-netstat -ano | findstr :3000
-netstat -ano | findstr :8000
-netstat -ano | findstr :27017
+### Port already in use (3000, 8080, 27017, 6379)
 
-# Kill the process (replace PID with actual process ID)
+```powershell
+netstat -ano | findstr :8080
 taskkill /PID <PID> /F
 ```
 
-**Option 2: Change ports in `docker-compose.yml`**
-```yaml
-services:
-  frontend:
-    ports:
-      - "3001:3000"  # Use 3001 instead
-  backend:
-    ports:
-      - "8001:8000"  # Use 8001 instead
+Or change the host side of the mapping in `docker-compose.yml`, e.g. `"8081:8000"`. If you move the API port, also update `NEXT_PUBLIC_API_URL` for the frontend and rebuild it.
+
+### `/health` says `degraded`
+
+The API can't reach MongoDB. In Docker, check `docker compose logs mongodb`. Locally, make sure MongoDB is running and `MONGODB_URL` in `.env` points at it (`mongodb://localhost:27017`).
+
+---
+
+## Scans
+
+### Scan stays "queued" and never progresses
+
+Nothing is consuming the queue. Check that:
+
+- the `worker` container is running (`docker compose ps`), or locally, that you started the Celery worker,
+- Redis is running and `REDIS_URL` matches on both the API and the worker.
+
+`start-dev.bat` doesn't start Redis or the worker. Start them yourself (see [../SETUP.md](../SETUP.md#local-setup-no-docker-for-the-app)).
+
+On Windows, a local worker started without `--pool=solo` (or `--pool=threads`) may start but never run tasks.
+
+### Every URL is `error`
+
+Look at `error_message` on the results (or in the results table):
+
+| `error_message` | Cause |
+|-----------------|-------|
+| `blocked:captcha`, `blocked:robot or human`, `blocked:access denied` … | The retailer served a bot-check page. See [Blocked by the retailer](#blocked-by-the-retailer) |
+| `All fetch methods failed …` | No method returned usable HTML. Check the worker log for the underlying Playwright, ScrapingBee, or HTTP error |
+| `Scan timed out after Ns` | The URL used its whole time budget. Usually slow variant probing or slow page loads. Raise `SCRAPER_PER_URL_TASK_TIMEOUT_SECONDS` or set `SCRAPER_CHECK_VARIANTS=false` |
+| `Worker hit Celery soft time limit …` | Raise `CELERY_SCRAPE_TASK_SOFT_TIME_LIMIT` / `CELERY_SCRAPE_TASK_TIME_LIMIT` |
+| `Executable doesn't exist` / `playwright install` in the worker log | Browsers aren't installed. Run `python -m playwright install chromium` (and `firefox` if you scan Staples or Office Depot) |
+
+**Staples and Office Depot in Docker:** the scraper uses Firefox for these two sites, but `backend/Dockerfile` only installs Chromium. Until `playwright install firefox` is added to the Dockerfile, Playwright fails on them in Docker and they fall back to ScrapingBee or plain HTTP.
+
+### Blocked by the retailer
+
+Amazon, Target, Walmart, Kohl's, Staples, and Home Depot regularly block automated browsers. Options, cheapest first:
+
+1. **Save cookies after solving a challenge by hand:**
+
+   ```powershell
+   $env:BOOTSTRAP_URL="https://www.target.com/p/-/A-88920975"
+   python scraper\bootstrap_state.py
+   ```
+
+   Later scans load `scraper/storage_state/target.com.json` automatically. Cookies expire, so repeat this when blocks come back.
+2. **Run with a visible browser** by setting `SCRAPER_HEADLESS=false` (only works locally, not in Docker).
+3. **Enable ScrapingBee** with `SCRAPINGBEE_API_KEY`. See [../SCRAPINGBEE.md](../SCRAPINGBEE.md).
+4. **Use the retailer's official API** where one exists (e.g. Amazon Product Advertising API).
+
+Set `SCRAPER_SCREENSHOT_DIR` in the environment to save a screenshot of each block page.
+
+### Scans blocked in Docker but not locally
+
+Sites check whether a browser looks like a real person's. The Docker setup gives away more signals than a local run:
+
+- **Mismatched fingerprint.** The scraper tells sites it's Chrome 120 on Windows. Inside the container it's actually Linux Chromium, and page JavaScript can see that: `navigator.platform` is `Linux x86_64`, only the Liberation fonts are installed, and there's no GPU, so graphics are software-rendered. Chromium's real version doesn't match 120 either. Locally on Windows these line up.
+- **Always headless.** The container has no display, and `docker-compose.yml` doesn't set `SCRAPER_HEADLESS`, so the default (`true`) applies. Headless browsers are easier to detect. `.env` isn't loaded into the containers, so setting it there has no effect.
+- **Data-center IP**, if the containers run on a cloud server rather than your own PC. Many retailers block data-center IP ranges outright. Docker Desktop on your PC uses your home IP, so this doesn't apply there.
+- **Cookies from a different browser.** Files in `storage_state/` created on Windows are reused by the Linux browser. Anti-bot services tie their cookies to a fingerprint, so this can look suspicious.
+
+To confirm, open a fingerprint test page such as `https://bot.sannysoft.com` with the scraper in both environments and compare screenshots.
+
+Possible fixes: send a Linux user agent in the container (or don't override it), install more fonts in `backend/Dockerfile`, run a visible browser under `xvfb-run` with `SCRAPER_HEADLESS=false`, use real Chrome (`playwright install chrome`, `channel="chrome"`), run `bootstrap_state.py` inside the container, and on cloud servers route through a residential proxy.
+
+### Product shows `unavailable` but is in stock
+
+1. Check `error_message`. If it's set, it's a fetch or block problem, not detection.
+2. Check `unavailability_override`. If true, "out of stock" or similar wording was found in the product area (possibly for another variant or seller). See [DETECTION_EXPLAINED.md](DETECTION_EXPLAINED.md#4-out-of-stock-override).
+3. Check `variants`. If every variant is unavailable, the default selection may be out of stock while others weren't probed. Variant probing is capped at 25 to 30 options.
+4. Open the page yourself and inspect the buy button. If the site isn't covered by `detection_rules.json`, add a rule and restart the worker.
+
+### Product shows `available` but is out of stock
+
+Usually the site renders a normal-looking button and only disables it with JavaScript, or it uses wording the detector doesn't know ("Pre-order", "Sign in to see price"). Add the site's disabled class or wording to `_DISABLED_CLASSES`, `_NEGATIVE_BUY_TEXT`, or `_UNAVAILABLE_SIGNALS` in `scraper/detector.py`.
+
+### Scans are slow
+
+Each URL can take 10 to 60 seconds with Playwright and variant checks. To go faster:
+
+- add workers: `docker compose up -d --scale worker=3` (about 200 MB of RAM per browser),
+- set `SCRAPER_CHECK_VARIANTS=false`,
+- enable ScrapingBee and set `SCRAPER_SCRAPINGBEE_FIRST=true` (faster, but no variant checks, and costs credits).
+
+The frontend stops polling after 30 minutes. If a very large scan outlives that, the job keeps running. Refresh the page later to see results.
+
+---
+
+## Frontend
+
+### "Failed to fetch" / network errors
+
+- The frontend calls `NEXT_PUBLIC_API_URL` (default `http://localhost:8080`). Check the browser's Network tab for the address it's actually using.
+- For CORS errors, add the frontend's origin to `CORS_ORIGINS`. It accepts a JSON list or a comma-separated string. In Docker, set it in `docker-compose.yml`.
+- `NEXT_PUBLIC_API_URL` is baked in at build time. After changing it, rebuild with `docker compose up -d --build frontend`.
+
+### Progress bar never finishes
+
+Open `GET /api/scan/{job_id}/status` directly. If `completed` stops increasing, check the worker log for a crash or a stuck URL. The per-URL timeout should eventually record an error for it.
+
+---
+
+## Data
+
+### Reset everything
+
+```powershell
+curl -X DELETE http://localhost:8080/api/urls           # URLs and results
+curl -X DELETE http://localhost:8080/api/scan/results   # results only
+docker compose down -v                                  # also wipes the MongoDB volume
+```
+
+### Inspect the database
+
+```powershell
+docker exec -it ubique-mongodb mongosh ubique_product_checker
+db.scan_jobs.find().sort({created_at:-1}).limit(1)
+db.scan_results.find({status:"error"}, {url:1, error_message:1})
 ```
 
 ---
 
-### Docker Compose Not Found
-
-**Error:** `docker-compose: command not found`
-
-**Solution:**
-Docker Desktop includes Docker Compose. If missing:
-1. Update Docker Desktop
-2. Or use: `docker compose up -d` (newer syntax without hyphen)
-
----
-
-## Runtime Issues
-
-### Services Won't Start
-
-**Error:** Containers exit immediately or won't start
-
-**Diagnosis:**
-```cmd
-# Check container status
-docker ps -a
-
-# View logs
-docker-compose logs
-
-# Check specific service
-docker-compose logs backend
-```
-
-**Common Causes:**
-
-1. **MongoDB won't start:**
-   ```cmd
-   # Remove old data
-   docker-compose down -v
-   docker-compose up -d
-   ```
-
-2. **Backend crashes:**
-   - Check Python dependencies: `docker-compose logs backend`
-   - Verify .env file exists
-   - Check MongoDB connection
-
-3. **Frontend build fails:**
-   - Check Node.js version in Dockerfile
-   - Clear npm cache: `docker-compose build --no-cache frontend`
-
----
-
-### Can't Access Frontend
-
-**Issue:** http://localhost:3000 not loading
-
-**Solutions:**
-
-1. **Check if container is running:**
-   ```cmd
-   docker ps | findstr frontend
-   ```
-
-2. **Check logs:**
-   ```cmd
-   docker-compose logs frontend
-   ```
-
-3. **Wait longer:**
-   - Initial build takes 2-3 minutes
-   - Subsequent starts take 30-60 seconds
-
-4. **Verify port mapping:**
-   ```cmd
-   docker ps
-   # Should show: 0.0.0.0:3000->3000/tcp
-   ```
-
-5. **Try restart:**
-   ```cmd
-   docker-compose restart frontend
-   ```
-
----
-
-### Backend API Not Responding
-
-**Issue:** http://localhost:8000 returns 404 or connection refused
-
-**Solutions:**
-
-1. **Check backend health:**
-   ```cmd
-   curl http://localhost:8000/health
-   ```
-
-2. **View backend logs:**
-   ```cmd
-   docker-compose logs -f backend
-   ```
-
-3. **Common issues:**
-   - MongoDB not connected: Check connection string
-   - Port conflict: Change port in docker-compose.yml
-   - Python errors: Check requirements.txt
-
-4. **Restart backend:**
-   ```cmd
-   docker-compose restart backend
-   ```
-
----
-
-### MongoDB Connection Failed
-
-**Error:** `Failed to connect to MongoDB`
-
-**Solutions:**
-
-1. **Check MongoDB is running:**
-   ```cmd
-   docker ps | findstr mongodb
-   ```
-
-2. **Start MongoDB:**
-   ```cmd
-   docker-compose up -d mongodb
-   ```
-
-3. **Check connection string in `.env`:**
-   ```
-   MONGODB_URL=mongodb://mongodb:27017
-   ```
-
-4. **Test MongoDB directly:**
-   ```cmd
-   docker exec -it ubique-mongodb mongosh
-   ```
-
-5. **Reset MongoDB:**
-   ```cmd
-   docker-compose down -v
-   docker-compose up -d mongodb
-   ```
-
----
-
-## Scanning Issues
-
-### All Scans Return Error
-
-**Issue:** Every URL shows error status
-
-**Diagnosis:**
-
-1. **Check backend logs:**
-   ```cmd
-   docker-compose logs backend | findstr ERROR
-   ```
-
-2. **Test scraper directly:**
-   ```cmd
-   cd scraper
-   python scraper.py
-   ```
-
-**Common Causes:**
-
-1. **Playwright not installed:**
-   ```cmd
-   docker exec -it ubique-backend bash
-   playwright install chromium
-   ```
-
-2. **Timeout too short:**
-   - Edit `.env`: `SCRAPER_TIMEOUT=60`
-   - Restart: `docker-compose restart backend`
-
-3. **Network issues:**
-   - Check internet connection
-   - Try different URLs
-   - Check firewall settings
-
----
-
-### Buttons Not Detected
-
-**Issue:** Valid products showing "unavailable"
-
-**Solutions:**
-
-1. **Check URL in browser:**
-   - Verify buttons exist on page
-   - Confirm page loads correctly
-
-2. **Review detection rules:**
-   - Open `scraper/detection_rules.json`
-   - Add site-specific selectors if needed
-
-3. **Try with Playwright enabled:**
-   - Edit `.env`: `SCRAPER_USE_PLAYWRIGHT=true`
-   - Restart backend
-
-4. **Test specific URL:**
-   ```python
-   from scraper import scrape_url
-   result = await scrape_url("https://example.com/product")
-   print(result)
-   ```
-
-5. **Add custom detection rule:**
-   ```json
-   {
-     "add_to_cart": {
-       "domains": {
-         "yoursite.com": {
-           "selectors": ["#custom-button-id"],
-           "text": ["Custom Button Text"]
-         }
-       }
-     }
-   }
-   ```
-
----
-
-### Scans Are Too Slow
-
-**Issue:** Takes too long to scan URLs
-
-**Solutions:**
-
-1. **Increase concurrency:**
-   ```
-   # In .env
-   SCRAPER_MAX_CONCURRENT=10
-   ```
-
-2. **Disable Playwright for static sites:**
-   ```
-   SCRAPER_USE_PLAYWRIGHT=false
-   ```
-
-3. **Reduce timeout:**
-   ```
-   SCRAPER_TIMEOUT=15
-   ```
-
-4. **Check network speed:**
-   - Test internet connection
-   - Try fewer URLs at once
-
----
-
-## Frontend Issues
-
-### "Failed to fetch" Errors
-
-**Issue:** Frontend can't communicate with backend
-
-**Solutions:**
-
-1. **Check API URL in browser console:**
-   - Should be: `http://localhost:8000`
-
-2. **Verify CORS settings:**
-   ```python
-   # In backend/app/main.py
-   CORS_ORIGINS=http://localhost:3000
-   ```
-
-3. **Check backend is accessible:**
-   ```cmd
-   curl http://localhost:8000/health
-   ```
-
-4. **Clear browser cache:**
-   - Ctrl + Shift + Delete
-   - Clear all cache
-   - Refresh page
-
----
-
-### UI Not Updating
-
-**Issue:** Data doesn't refresh after actions
-
-**Solutions:**
-
-1. **Hard refresh browser:**
-   - Ctrl + F5 (Windows)
-   - Cmd + Shift + R (Mac)
-
-2. **Check browser console:**
-   - F12 → Console tab
-   - Look for JavaScript errors
-
-3. **Clear browser cache:**
-   - Settings → Clear browsing data
-   - Refresh page
-
-4. **Restart frontend:**
-   ```cmd
-   docker-compose restart frontend
-   ```
-
----
-
-## Data Issues
-
-### URLs Not Saving
-
-**Issue:** Added URLs disappear
-
-**Solutions:**
-
-1. **Check MongoDB persistence:**
-   ```cmd
-   docker exec -it ubique-mongodb mongosh
-   use ubique_product_checker
-   db.urls.find()
-   ```
-
-2. **Verify volume mounting:**
-   ```cmd
-   docker volume ls | findstr mongodb
-   ```
-
-3. **Check backend logs:**
-   ```cmd
-   docker-compose logs backend | findstr "add"
-   ```
-
-4. **Test API directly:**
-   ```cmd
-   curl -X POST http://localhost:8000/api/urls/add ^
-     -H "Content-Type: application/json" ^
-     -d "{\"urls\":[\"https://example.com\"]}"
-   ```
-
----
-
-### Database Reset Needed
-
-**Issue:** Need to clear all data
-
-**Solutions:**
-
-1. **Via API:**
-   ```cmd
-   curl -X DELETE http://localhost:8000/api/urls
-   curl -X DELETE http://localhost:8000/api/scan/results
-   ```
-
-2. **Via MongoDB:**
-   ```cmd
-   docker exec -it ubique-mongodb mongosh
-   use ubique_product_checker
-   db.dropDatabase()
-   ```
-
-3. **Complete reset:**
-   ```cmd
-   docker-compose down -v
-   docker-compose up -d
-   ```
-
----
-
-## Performance Issues
-
-### High Memory Usage
-
-**Issue:** Docker using too much RAM
-
-**Solutions:**
-
-1. **Check resource usage:**
-   ```cmd
-   docker stats
-   ```
-
-2. **Limit container memory in `docker-compose.yml`:**
-   ```yaml
-   services:
-     backend:
-       mem_limit: 512m
-   ```
-
-3. **Reduce concurrent scans:**
-   ```
-   SCRAPER_MAX_CONCURRENT=3
-   ```
-
-4. **Disable Playwright:**
-   ```
-   SCRAPER_USE_PLAYWRIGHT=false
-   ```
-
----
-
-### Disk Space Issues
-
-**Issue:** Docker using too much disk space
-
-**Solutions:**
-
-1. **Check disk usage:**
-   ```cmd
-   docker system df
-   ```
-
-2. **Clean up:**
-   ```cmd
-   docker system prune -a
-   docker volume prune
-   ```
-
-3. **Clear logs:**
-   ```cmd
-   # Delete log files
-   del backend\logs\*.log
-   ```
-
----
-
-## Development Issues
-
-### Python Dependencies Won't Install
-
-**Issue:** pip install fails
-
-**Solutions:**
-
-1. **Update pip:**
-   ```cmd
-   python -m pip install --upgrade pip
-   ```
-
-2. **Install build tools:**
-   - Install Visual Studio Build Tools
-   - Or: Microsoft C++ Build Tools
-
-3. **Try one package at a time:**
-   ```cmd
-   pip install fastapi
-   pip install uvicorn
-   # etc.
-   ```
-
-4. **Use virtual environment:**
-   ```cmd
-   python -m venv venv
-   venv\Scripts\activate
-   ```
-
----
-
-### Node Modules Issues
-
-**Issue:** npm install fails or modules not found
-
-**Solutions:**
-
-1. **Clear npm cache:**
-   ```cmd
-   npm cache clean --force
-   ```
-
-2. **Delete node_modules:**
-   ```cmd
-   rmdir /s /q node_modules
-   npm install
-   ```
-
-3. **Update npm:**
-   ```cmd
-   npm install -g npm@latest
-   ```
-
-4. **Use correct Node version:**
-   - Install Node 18 LTS
-   - Check: `node --version`
-
----
-
-### Playwright Installation Fails
-
-**Issue:** `playwright install` errors
-
-**Solutions:**
-
-1. **Install system dependencies:**
-   ```cmd
-   playwright install-deps
-   ```
-
-2. **Install specific browser:**
-   ```cmd
-   playwright install chromium
-   ```
-
-3. **Use Docker:**
-   - Playwright is pre-installed in Docker image
-   - No manual installation needed
-
----
-
-## Logging and Debugging
-
-### Enable Debug Logging
-
-**Backend:**
-```
-# In .env
-LOG_LEVEL=DEBUG
-```
-
-**Frontend:**
-```typescript
-// In browser console
-localStorage.setItem('debug', '*');
-```
-
----
-
-### View All Logs
-
-```cmd
-# All services
-docker-compose logs -f
-
-# Last 100 lines
-docker-compose logs --tail=100
-
-# Specific service
-docker-compose logs -f backend
-docker-compose logs -f frontend
-docker-compose logs -f mongodb
-
-# Save logs to file
-docker-compose logs > debug.log
-```
-
----
-
-### Access Container Shell
-
-```cmd
-# Backend
-docker exec -it ubique-backend bash
-
-# Frontend
-docker exec -it ubique-frontend sh
-
-# MongoDB
-docker exec -it ubique-mongodb mongosh
-```
-
----
-
-## Getting Help
-
-### Before Asking for Help
-
-1. ✅ Check this troubleshooting guide
-2. ✅ Review error messages in logs
-3. ✅ Try restarting services
-4. ✅ Check all documentation files
-5. ✅ Test with simple examples
-
-### What to Include
-
-When reporting issues, provide:
-- Error message (exact text)
-- Relevant logs
-- Steps to reproduce
-- System information
-- What you've already tried
-
-### Useful Commands
-
-```cmd
-# System info
-docker --version
-docker-compose --version
-python --version
-node --version
-
-# Container status
-docker ps -a
-
-# All logs
-docker-compose logs > all-logs.txt
-
-# Resource usage
-docker stats --no-stream
-```
-
----
-
-## Still Having Issues?
-
-1. **Review documentation:**
-   - README.md
-   - SETUP.md
-   - USER_GUIDE.md
-   - DEVELOPMENT.md
-
-2. **Check logs carefully:**
-   - Often error messages contain the solution
-
-3. **Try fresh start:**
-   ```cmd
-   docker-compose down -v
-   docker-compose build --no-cache
-   docker-compose up -d
-   ```
-
-4. **Contact support:**
-   - Provide detailed error information
-   - Include steps to reproduce
-   - Share relevant logs
-
----
-
-**Remember:** Most issues can be resolved by:
-- Checking logs
-- Restarting services
-- Verifying configuration
-- Reading error messages carefully
-
-Good luck! 🍀
+## Local Python and Node problems
+
+- **Playwright install fails:** `python -m playwright install --with-deps chromium` on Linux. On Windows, plain `install chromium` is enough.
+- **`NotImplementedError` from asyncio on Windows:** start the API with `python run.py`, which sets the Proactor event loop Playwright needs.
+- **npm errors:** delete `frontend/node_modules`, then `npm ci`. Use Node 18 or newer.
